@@ -1,0 +1,309 @@
+# =============================================================================
+# Home Assistant Helpers for Heat Orchestrator
+# =============================================================================
+# Add this file as a package or copy sections into your configuration.yaml.
+#
+# To use as a package:
+#   1. In configuration.yaml add:
+#      homeassistant:
+#        packages:
+#          heat_orchestrator: !include packages/heat_orchestrator_helpers.yaml
+#
+#   2. Place this file at: /config/packages/heat_orchestrator_helpers.yaml
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Per-room user setpoints (remembered setpoints)
+# ---------------------------------------------------------------------------
+input_number:
+  # --- Gabinet Ani ---
+  user_sp_gabinet_ani:
+    name: "User SP – Gabinet Ani"
+    min: 5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer
+
+  priority_gabinet_ani:
+    name: "Priority – Gabinet Ani"
+    min: 1
+    max: 100
+    step: 1
+    icon: mdi:priority-high
+
+  # --- Łazienka Parter ---
+  user_sp_lazienka_parter:
+    name: "User SP – Łazienka Parter"
+    min: 5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer
+
+  priority_lazienka_parter:
+    name: "Priority – Łazienka Parter"
+    min: 1
+    max: 100
+    step: 1
+    icon: mdi:priority-high
+
+  # --- Salon ---
+  user_sp_salon:
+    name: "User SP – Salon"
+    min: 5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer
+
+  priority_salon:
+    name: "Priority – Salon"
+    min: 1
+    max: 100
+    step: 1
+    icon: mdi:priority-high
+
+  # --- Sypialnia ---
+  user_sp_sypialnia:
+    name: "User SP – Sypialnia"
+    min: 5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer
+
+  priority_sypialnia:
+    name: "Priority – Sypialnia"
+    min: 1
+    max: 100
+    step: 1
+    icon: mdi:priority-high
+
+  # --- Łazienka Piętro ---
+  user_sp_lazienka_pietro:
+    name: "User SP – Łazienka Piętro"
+    min: 5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer
+
+  priority_lazienka_pietro:
+    name: "Priority – Łazienka Piętro"
+    min: 1
+    max: 100
+    step: 1
+    icon: mdi:priority-high
+
+  # --- Pokój z oknem narożnym ---
+  user_sp_pokoj_z_oknem_naroznym:
+    name: "User SP – Pokój z oknem narożnym"
+    min: 5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer
+
+  priority_pokoj_z_oknem_naroznym:
+    name: "Priority – Pokój z oknem narożnym"
+    min: 1
+    max: 100
+    step: 1
+    icon: mdi:priority-high
+
+  # --- Pokój z tarasem ---
+  user_sp_pokoj_z_tarasem:
+    name: "User SP – Pokój z tarasem"
+    min: 5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer
+
+  priority_pokoj_z_tarasem:
+    name: "Priority – Pokój z tarasem"
+    min: 1
+    max: 100
+    step: 1
+    icon: mdi:priority-high
+
+  # ---------------------------------------------------------------------------
+  # Global control parameters
+  # ---------------------------------------------------------------------------
+  room_off_setpoint:
+    name: "Room OFF Setpoint"
+    min: 5
+    max: 15
+    step: 0.5
+    initial: 7
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-off
+
+  heating_hyst_on:
+    name: "Heating Hysteresis ON"
+    min: 0.1
+    max: 2.0
+    step: 0.1
+    initial: 0.3
+    unit_of_measurement: "°C"
+    icon: mdi:delta
+
+  heating_hyst_off:
+    name: "Heating Hysteresis OFF"
+    min: 0.05
+    max: 1.0
+    step: 0.05
+    initial: 0.2
+    unit_of_measurement: "°C"
+    icon: mdi:delta
+
+  min_state_duration_min:
+    name: "Min State Duration"
+    min: 5
+    max: 120
+    step: 5
+    initial: 25
+    unit_of_measurement: "min"
+    icon: mdi:timer-outline
+
+  min_pump_on_min:
+    name: "Min Pump ON Time"
+    min: 5
+    max: 120
+    step: 5
+    initial: 40
+    unit_of_measurement: "min"
+    icon: mdi:timer
+
+  min_pump_off_min:
+    name: "Min Pump OFF Time"
+    min: 5
+    max: 120
+    step: 5
+    initial: 25
+    unit_of_measurement: "min"
+    icon: mdi:timer-off
+
+  # ---------------------------------------------------------------------------
+  # CWU / DHW quota
+  # ---------------------------------------------------------------------------
+  dhw_min_run_hours:
+    name: "DHW Min Pump Hours/Day"
+    min: 0
+    max: 12
+    step: 0.5
+    initial: 3.5
+    unit_of_measurement: "h"
+    icon: mdi:water-boiler
+
+  pump_on_minutes_today:
+    name: "Pump ON Minutes Today"
+    min: 0
+    max: 1440
+    step: 1
+    initial: 0
+    unit_of_measurement: "min"
+    icon: mdi:counter
+
+  # ---------------------------------------------------------------------------
+  # Temperature mode thresholds
+  # ---------------------------------------------------------------------------
+  bulk_mode_temp:
+    name: "Bulk Mode Temp Threshold"
+    min: -20
+    max: 20
+    step: 1
+    initial: 5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-chevron-up
+
+  sequential_mode_temp:
+    name: "Sequential Mode Temp Threshold"
+    min: -30
+    max: 10
+    step: 1
+    initial: -5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-chevron-down
+
+  max_rooms_limited:
+    name: "Max Rooms (Limited Mode)"
+    min: 1
+    max: 7
+    step: 1
+    initial: 2
+    icon: mdi:door-open
+
+  # ---------------------------------------------------------------------------
+  # Diagnostics
+  # ---------------------------------------------------------------------------
+  pump_starts_today:
+    name: "Pump Starts Today"
+    min: 0
+    max: 100
+    step: 1
+    initial: 0
+    icon: mdi:counter
+
+# ---------------------------------------------------------------------------
+# Date/Time helpers
+# ---------------------------------------------------------------------------
+input_datetime:
+  off_window_start:
+    name: "OFF Window Start"
+    has_time: true
+    has_date: false
+    icon: mdi:weather-night
+
+  off_window_end:
+    name: "OFF Window End"
+    has_time: true
+    has_date: false
+    icon: mdi:weather-sunset-up
+
+  day_reset_time:
+    name: "Daily Reset Time"
+    has_time: true
+    has_date: false
+    icon: mdi:update
+
+  state_since:
+    name: "State Since"
+    has_time: true
+    has_date: true
+    icon: mdi:clock-outline
+
+  last_pump_on:
+    name: "Last Pump ON"
+    has_time: true
+    has_date: true
+    icon: mdi:pump
+
+  last_pump_off:
+    name: "Last Pump OFF"
+    has_time: true
+    has_date: true
+    icon: mdi:pump-off
+
+# ---------------------------------------------------------------------------
+# Text helpers (FSM state, diagnostics)
+# ---------------------------------------------------------------------------
+input_text:
+  heat_state:
+    name: "Heat Orchestrator State"
+    initial: "OFF"
+    max: 50
+    icon: mdi:state-machine
+
+  active_floor:
+    name: "Active Floor"
+    initial: "none"
+    max: 10
+    icon: mdi:floor-plan
+
+  active_rooms:
+    name: "Active Rooms"
+    initial: ""
+    max: 255
+    icon: mdi:door

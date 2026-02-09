@@ -1,0 +1,7 @@
+---
+# AppDaemon configuration for Heat Orchestrator
+# Place this file in your AppDaemon apps directory (e.g., /config/appdaemon/apps/)
+
+heat_orchestrator:
+  module: heat_orchestrator
+  class: HeatOrchestrator

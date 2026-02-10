@@ -83,6 +83,11 @@ Then create global helpers:
 | Number | `bulk_mode_temp` | -20–20 | 1 | 5 | °C |
 | Number | `sequential_mode_temp` | -30–10 | 1 | -5 | °C |
 | Number | `max_rooms_limited` | 1–7 | 1 | 2 | – |
+| Number | `max_continuous_heating_min` | 30–480 | 15 | 120 | min |
+| Number | `lerp_temp_min` | -30–10 | 1 | -10 | °C |
+| Number | `lerp_temp_max` | -10–30 | 1 | 10 | °C |
+| Number | `lerp_rooms_min` | 1–3 | 1 | 1 | – |
+| Number | `lerp_rooms_max` | 1–7 | 1 | 5 | – |
 | DateTime (time only) | `off_window_start` | – | – | 01:00 | – |
 | DateTime (time only) | `off_window_end` | – | – | 06:00 | – |
 | DateTime (time only) | `day_reset_time` | – | – | 00:00 | – |

@@ -5,7 +5,7 @@ Controls underfloor heating with a heat pump, managing floor selection (GF/FF),
 room-level valve control via thermostats, pump on/off logic, DHW quota,
 and nightly off-window enforcement.
 
-Spec version: 2026-02-09
+Spec version: 2026-02-10
 """
 
 from __future__ import annotations

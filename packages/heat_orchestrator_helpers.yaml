@@ -236,6 +236,55 @@ input_number:
     icon: mdi:door-open
 
   # ---------------------------------------------------------------------------
+  # Max continuous heating time per room
+  # ---------------------------------------------------------------------------
+  max_continuous_heating_min:
+    name: "Max Continuous Heating Time"
+    min: 30
+    max: 480
+    step: 15
+    initial: 120
+    unit_of_measurement: "min"
+    icon: mdi:timer-alert
+
+  # ---------------------------------------------------------------------------
+  # LERP-based room selection parameters
+  # ---------------------------------------------------------------------------
+  lerp_temp_min:
+    name: "LERP Temp Min (1 room)"
+    min: -30
+    max: 10
+    step: 1
+    initial: -10
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-low
+
+  lerp_temp_max:
+    name: "LERP Temp Max (max rooms)"
+    min: -10
+    max: 30
+    step: 1
+    initial: 10
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-high
+
+  lerp_rooms_min:
+    name: "LERP Min Rooms"
+    min: 1
+    max: 3
+    step: 1
+    initial: 1
+    icon: mdi:door-closed
+
+  lerp_rooms_max:
+    name: "LERP Max Rooms"
+    min: 1
+    max: 7
+    step: 1
+    initial: 5
+    icon: mdi:door-open
+
+  # ---------------------------------------------------------------------------
   # Diagnostics
   # ---------------------------------------------------------------------------
   pump_starts_today:

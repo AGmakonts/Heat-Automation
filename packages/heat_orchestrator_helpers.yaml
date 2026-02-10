@@ -287,6 +287,38 @@ input_datetime:
     icon: mdi:pump-off
 
 # ---------------------------------------------------------------------------
+# Per-room heating status (for history / plotting)
+# ---------------------------------------------------------------------------
+input_boolean:
+  heating_gabinet_ani:
+    name: "Heating – Gabinet Ani"
+    icon: mdi:radiator
+
+  heating_lazienka_parter:
+    name: "Heating – Łazienka Parter"
+    icon: mdi:radiator
+
+  heating_salon:
+    name: "Heating – Salon"
+    icon: mdi:radiator
+
+  heating_sypialnia:
+    name: "Heating – Sypialnia"
+    icon: mdi:radiator
+
+  heating_lazienka_pietro:
+    name: "Heating – Łazienka Piętro"
+    icon: mdi:radiator
+
+  heating_pokoj_z_oknem_naroznym:
+    name: "Heating – Pokój z oknem narożnym"
+    icon: mdi:radiator
+
+  heating_pokoj_z_tarasem:
+    name: "Heating – Pokój z tarasem"
+    icon: mdi:radiator
+
+# ---------------------------------------------------------------------------
 # Text helpers (FSM state, diagnostics)
 # ---------------------------------------------------------------------------
 input_text:

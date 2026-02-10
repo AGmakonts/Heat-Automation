@@ -8,9 +8,10 @@ and nightly off-window enforcement.
 Spec version: 2026-02-09
 """
 
-from appdaemon.plugins.hass import Hass
+from __future__ import annotations
+
+import hassapi as hass
 import datetime
-import json
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -22,6 +23,7 @@ ALL_ROOMS = GF_ROOMS + FF_ROOMS
 CLIMATE_PREFIX = "climate."
 USER_SP_PREFIX = "input_number.user_sp_"
 PRIORITY_PREFIX = "input_number.priority_"
+HEATING_PREFIX = "input_boolean.heating_"
 
 PUMP_SWITCH = "switch.sonoff_10017fadeb"
 PUMP_OFF_BUTTON = "input_button.wylacznik_pompy"
@@ -37,7 +39,7 @@ STATE_DHW_QUOTA = "DHW_QUOTA"
 GUARD_RELEASE_DELAY = 2  # seconds
 
 
-class HeatOrchestrator(Hass):
+class HeatOrchestrator(hass.Hass):
     """Main heat orchestrator AppDaemon application."""
 
     # -----------------------------------------------------------------------
@@ -355,6 +357,7 @@ class HeatOrchestrator(Hass):
                 "climate/set_temperature", entity_id=entity, temperature=t_user
             )
             self.log(f"[ROOM] enable {room} → {t_user}°C")
+            self._set_heating_sensor(room, True)
         except Exception as e:
             self.log(f"[ERROR] enable_room {room}: {e}", level="ERROR")
             # Retry once
@@ -362,6 +365,7 @@ class HeatOrchestrator(Hass):
                 self.call_service(
                     "climate/set_temperature", entity_id=entity, temperature=t_user
                 )
+                self._set_heating_sensor(room, True)
             except Exception as e2:
                 self.log(f"[ERROR] enable_room {room} retry failed: {e2}", level="ERROR")
                 self.unmanaged_rooms[room] = self.datetime()
@@ -381,17 +385,28 @@ class HeatOrchestrator(Hass):
                 "climate/set_temperature", entity_id=entity, temperature=off_sp
             )
             self.log(f"[ROOM] disable {room} → {off_sp}°C")
+            self._set_heating_sensor(room, False)
         except Exception as e:
             self.log(f"[ERROR] disable_room {room}: {e}", level="ERROR")
             try:
                 self.call_service(
                     "climate/set_temperature", entity_id=entity, temperature=off_sp
                 )
+                self._set_heating_sensor(room, False)
             except Exception as e2:
                 self.log(f"[ERROR] disable_room {room} retry failed: {e2}", level="ERROR")
                 self.unmanaged_rooms[room] = self.datetime()
 
         self.run_in(self._release_guard, GUARD_RELEASE_DELAY, room=room)
+
+    def _set_heating_sensor(self, room: str, heating: bool):
+        """Update the per-room heating status input_boolean."""
+        entity = f"{HEATING_PREFIX}{room}"
+        try:
+            service = "input_boolean/turn_on" if heating else "input_boolean/turn_off"
+            self.call_service(service, entity_id=entity)
+        except Exception:
+            pass  # Sensor is optional, don't crash
 
     def _release_guard(self, **kwargs):
         room = kwargs.get("room")

@@ -162,10 +162,11 @@ Follow the [official AppDaemon installation docs](https://appdaemon.readthedocs.
    ├── appdaemon.yaml
    ├── secrets.yaml
    └── apps/
-       └── heat_orchestrator/
-           ├── heat_orchestrator.py
-           └── apps.yaml
+       ├── heat_orchestrator.py
+       └── apps.yaml
    ```
+
+   > **Important:** Place both files directly in the `apps/` folder — do **not** put them inside a `heat_orchestrator/` subdirectory. AppDaemon would treat the directory name as a Python package and fail to find the class.
 
 ---
 
@@ -174,9 +175,11 @@ Follow the [official AppDaemon installation docs](https://appdaemon.readthedocs.
 1. Copy the two files from this repository into your AppDaemon apps directory:
 
    ```
-   apps/heat_orchestrator/heat_orchestrator.py  →  <appdaemon_config>/apps/heat_orchestrator/heat_orchestrator.py
-   apps/heat_orchestrator/apps.yaml             →  <appdaemon_config>/apps/heat_orchestrator/apps.yaml
+   apps/heat_orchestrator/heat_orchestrator.py  →  <appdaemon_config>/apps/heat_orchestrator.py
+   apps/heat_orchestrator/apps.yaml             →  <appdaemon_config>/apps/apps.yaml
    ```
+
+   > **Note:** The files in this repo are under `apps/heat_orchestrator/` for organisation, but on AppDaemon they must sit directly in `apps/`.
 
 2. AppDaemon will automatically detect the new files and load the app.
 
@@ -247,6 +250,21 @@ entities:
     name: Last Pump ON
   - entity: input_datetime.last_pump_off
     name: Last Pump OFF
+  - type: divider
+  - entity: input_boolean.heating_gabinet_ani
+    name: Heating Gabinet Ani
+  - entity: input_boolean.heating_lazienka_parter
+    name: Heating Łazienka Parter
+  - entity: input_boolean.heating_salon
+    name: Heating Salon
+  - entity: input_boolean.heating_sypialnia
+    name: Heating Sypialnia
+  - entity: input_boolean.heating_lazienka_pietro
+    name: Heating Łazienka Piętro
+  - entity: input_boolean.heating_pokoj_z_oknem_naroznym
+    name: Heating Pokój z oknem narożnym
+  - entity: input_boolean.heating_pokoj_z_tarasem
+    name: Heating Pokój z tarasem
   - type: divider
   - entity: input_number.user_sp_salon
   - entity: input_number.user_sp_sypialnia

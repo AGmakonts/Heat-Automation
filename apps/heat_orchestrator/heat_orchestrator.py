@@ -381,7 +381,11 @@ class HeatOrchestrator(hass.Hass):
 
     def _enable_room(self, room: str):
         # Track heating start time if room was not previously heating
-        was_heating = self._is_room_heating(room)
+        # Check if we're already tracking this room to avoid redundant state queries
+        if self.room_heating_start.get(room) is None:
+            was_heating = self._is_room_heating(room)
+        else:
+            was_heating = True  # Already tracked, so it was heating
         
         t_user = self._get_number(f"{USER_SP_PREFIX}{room}")
         if t_user is None or t_user < 5.0 or t_user > 30.0:
@@ -567,19 +571,26 @@ class HeatOrchestrator(hass.Hass):
     # -----------------------------------------------------------------------
     # Room selection per mode (LERP-based)
     # -----------------------------------------------------------------------
+    def _is_room_in_cooldown(self, room: str, now: datetime.datetime) -> bool:
+        """Check if a room is currently in cooldown."""
+        cooldown_until = self.room_cooldown_until.get(room)
+        if cooldown_until and now < cooldown_until:
+            return True
+        elif cooldown_until and now >= cooldown_until:
+            # Cooldown expired, clear it
+            self.room_cooldown_until[room] = None
+        return False
+
     def _select_rooms(self, floor: str) -> list[str]:
         rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
         now = self.datetime()
         
-        # Check for rooms in cooldown and enforce max continuous heating
+        # Build candidate list with demand check, cooldown enforcement, and max time check
+        candidates = []
         for room in rooms:
-            # Check if room is in cooldown
-            cooldown_until = self.room_cooldown_until.get(room)
-            if cooldown_until and now < cooldown_until:
-                continue  # Still in cooldown, skip to next room
-            elif cooldown_until and now >= cooldown_until:
-                # Cooldown expired, clear it
-                self.room_cooldown_until[room] = None
+            # Check if room needs heat
+            if not self._need_heat(room):
+                continue
             
             # Check if room has exceeded max continuous heating time
             heating_start = self.room_heating_start.get(room)
@@ -590,16 +601,13 @@ class HeatOrchestrator(hass.Hass):
                     cooldown_duration_min = self.min_state_duration
                     self.room_cooldown_until[room] = now + datetime.timedelta(minutes=cooldown_duration_min)
                     self.log(f"[ROOM] {room} forced cooldown after {elapsed_min:.0f}min continuous heating")
-        
-        # Build candidate list (rooms with demand AND not in cooldown)
-        candidates = []
-        for r in rooms:
-            if not self._need_heat(r):
+            
+            # Check if room is in cooldown (including just-set cooldown above)
+            if self._is_room_in_cooldown(room, now):
                 continue
-            cooldown_until = self.room_cooldown_until.get(r)
-            if cooldown_until and now < cooldown_until:
-                continue  # Skip rooms in cooldown
-            candidates.append(r)
+            
+            # Room is eligible
+            candidates.append(room)
 
         if not candidates:
             return []

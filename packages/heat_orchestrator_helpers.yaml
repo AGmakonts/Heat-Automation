@@ -298,7 +298,7 @@ input_boolean:
     name: "Heating – Łazienka Parter"
     icon: mdi:radiator
 
-  heating_salon:
+  heating_salon_2:
     name: "Heating – Salon"
     icon: mdi:radiator
 

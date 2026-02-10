@@ -16,7 +16,7 @@ import datetime
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-GF_ROOMS = ["gabinet_ani", "lazienka_parter", "salon"]
+GF_ROOMS = ["gabinet_ani", "lazienka_parter", "salon_2"]
 FF_ROOMS = ["sypialnia", "lazienka_pietro", "pokoj_z_oknem_naroznym", "pokoj_z_tarasem"]
 ALL_ROOMS = GF_ROOMS + FF_ROOMS
 
@@ -349,6 +349,7 @@ class HeatOrchestrator(hass.Hass):
         entity = f"{CLIMATE_PREFIX}{room}"
         current_sp = self._get_climate_setpoint(room)
         if current_sp is not None and abs(current_sp - t_user) < 0.05:
+            self._set_heating_sensor(room, True)
             return  # already correct
 
         self.automation_guard[room] = True
@@ -377,6 +378,7 @@ class HeatOrchestrator(hass.Hass):
         off_sp = self.room_off_setpoint
         current_sp = self._get_climate_setpoint(room)
         if current_sp is not None and abs(current_sp - off_sp) < 0.05:
+            self._set_heating_sensor(room, False)
             return  # already at off setpoint
 
         self.automation_guard[room] = True
@@ -399,14 +401,23 @@ class HeatOrchestrator(hass.Hass):
 
         self.run_in(self._release_guard, GUARD_RELEASE_DELAY, room=room)
 
+    # Mapping for rooms whose input_boolean entity ID differs from room_id
+    _HEATING_ENTITY_OVERRIDES: dict[str, str] = {
+        "salon": "input_boolean.heating_salon_2",
+    }
+
     def _set_heating_sensor(self, room: str, heating: bool):
         """Update the per-room heating status input_boolean."""
-        entity = f"{HEATING_PREFIX}{room}"
+        entity = self._HEATING_ENTITY_OVERRIDES.get(room, f"{HEATING_PREFIX}{room}")
         try:
+            current = self.get_state(entity)
+            target = "on" if heating else "off"
+            if current == target:
+                return  # already in correct state
             service = "input_boolean/turn_on" if heating else "input_boolean/turn_off"
             self.call_service(service, entity_id=entity)
-        except Exception:
-            pass  # Sensor is optional, don't crash
+        except Exception as e:
+            self.log(f"[WARN] heating sensor {entity}: {e}", level="WARNING")
 
     def _release_guard(self, **kwargs):
         room = kwargs.get("room")

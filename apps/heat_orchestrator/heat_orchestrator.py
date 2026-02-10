@@ -593,21 +593,13 @@ class HeatOrchestrator(hass.Hass):
         return False
 
     def _has_selectable_rooms(self, floor: str) -> bool:
-        """Check if a floor has any rooms with demand that are NOT in cooldown."""
-        rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
-        now = self.datetime()
-        for room in rooms:
-            if not self._need_heat(room):
-                continue
-            # Check max continuous heating time (would trigger cooldown)
-            heating_start = self.room_heating_start.get(room)
-            if heating_start is not None and self._is_room_heating(room):
-                elapsed_min = (now - heating_start).total_seconds() / 60.0
-                if elapsed_min >= self.max_continuous_heating_min:
-                    continue  # Would be put into cooldown
-            if not self._is_room_in_cooldown(room, now):
-                return True
-        return False
+        """Check if a floor has any rooms with demand that are NOT in cooldown.
+
+        Delegates to _select_rooms so that cooldown side effects (e.g. updating
+        room_cooldown_until when max continuous heating is exceeded) are applied
+        consistently.
+        """
+        return bool(self._select_rooms(floor))
 
     def _select_rooms(self, floor: str) -> list[str]:
         rooms = GF_ROOMS if floor == "GF" else FF_ROOMS

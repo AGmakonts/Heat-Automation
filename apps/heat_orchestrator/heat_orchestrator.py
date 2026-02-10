@@ -592,6 +592,23 @@ class HeatOrchestrator(hass.Hass):
             self.room_cooldown_until[room] = None
         return False
 
+    def _has_selectable_rooms(self, floor: str) -> bool:
+        """Check if a floor has any rooms with demand that are NOT in cooldown."""
+        rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
+        now = self.datetime()
+        for room in rooms:
+            if not self._need_heat(room):
+                continue
+            # Check max continuous heating time (would trigger cooldown)
+            heating_start = self.room_heating_start.get(room)
+            if heating_start is not None and self._is_room_heating(room):
+                elapsed_min = (now - heating_start).total_seconds() / 60.0
+                if elapsed_min >= self.max_continuous_heating_min:
+                    continue  # Would be put into cooldown
+            if not self._is_room_in_cooldown(room, now):
+                return True
+        return False
+
     def _select_rooms(self, floor: str) -> list[str]:
         rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
         now = self.datetime()
@@ -767,13 +784,25 @@ class HeatOrchestrator(hass.Hass):
                 min_dur_ok = elapsed >= self.min_state_duration
 
             if min_dur_ok:
-                # Reconsider floor
+                # Reconsider floor based on scores
                 if active_floor == "GF" and score_ff > score_gf and demand_ff:
                     active_floor = "FF"
                     self.log(f"[DECISION] switching floor GF→FF (FF_score={score_ff:.1f} > GF_score={score_gf:.1f})")
                 elif active_floor == "FF" and score_gf > score_ff and demand_gf:
                     active_floor = "GF"
                     self.log(f"[DECISION] switching floor FF→GF (GF_score={score_gf:.1f} > FF_score={score_ff:.1f})")
+
+                # Switch floor if all rooms on active floor are in cooldown
+                # but the other floor has selectable rooms
+                if not self._has_selectable_rooms(active_floor):
+                    other_floor = "FF" if active_floor == "GF" else "GF"
+                    other_demand = demand_ff if other_floor == "FF" else demand_gf
+                    if other_demand and self._has_selectable_rooms(other_floor):
+                        self.log(
+                            f"[DECISION] switching floor {active_floor}→{other_floor} "
+                            f"reason=all_rooms_cooldown on {active_floor}"
+                        )
+                        active_floor = other_floor
 
             new_state = STATE_HEAT_GF if active_floor == "GF" else STATE_HEAT_FF
             self._apply_floor(active_floor)

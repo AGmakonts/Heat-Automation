@@ -592,20 +592,15 @@ class HeatOrchestrator(hass.Hass):
             self.room_cooldown_until[room] = None
         return False
 
-    def _has_selectable_rooms(self, floor: str) -> bool:
-        """Check if a floor has any rooms with demand that are NOT in cooldown.
-
-        Delegates to _select_rooms so that cooldown side effects (e.g. updating
-        room_cooldown_until when max continuous heating is exceeded) are applied
-        consistently.
+    def _build_candidates(self, floor: str) -> list[str]:
+        """Build list of rooms with demand that are eligible (not in cooldown).
+        
+        Applies cooldown side effects when rooms exceed max continuous heating time.
+        Does not sort or apply LERP limits - just returns eligible rooms.
         """
-        return bool(self._select_rooms(floor))
-
-    def _select_rooms(self, floor: str) -> list[str]:
         rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
         now = self.datetime()
         
-        # Build candidate list with demand check, cooldown enforcement, and max time check
         candidates = []
         for room in rooms:
             # Check if room needs heat
@@ -628,7 +623,24 @@ class HeatOrchestrator(hass.Hass):
             
             # Room is eligible
             candidates.append(room)
+        
+        return candidates
 
+    def _has_selectable_rooms(self, floor: str) -> bool:
+        """Check if a floor has any rooms with demand that are NOT in cooldown.
+
+        Uses _build_candidates to apply cooldown side effects consistently,
+        but avoids unnecessary sorting and LERP calculations.
+        """
+        return bool(self._build_candidates(floor))
+
+    def _select_rooms(self, floor: str) -> list[str]:
+        """Select rooms to heat on the given floor.
+        
+        Returns sorted list of rooms, limited by LERP-based outdoor temperature calculation.
+        """
+        candidates = self._build_candidates(floor)
+        
         if not candidates:
             return []
 
@@ -647,6 +659,7 @@ class HeatOrchestrator(hass.Hass):
         max_rooms_lerp = self._lerp_max_rooms(t_out)
         
         # Clamp to floor room count
+        rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
         max_rooms_for_floor = len(rooms)
         max_rooms = min(max_rooms_lerp, max_rooms_for_floor)
         
@@ -784,15 +797,16 @@ class HeatOrchestrator(hass.Hass):
                     active_floor = "GF"
                     self.log(f"[DECISION] switching floor FF→GF (GF_score={score_gf:.1f} > FF_score={score_ff:.1f})")
 
-                # Switch floor if all rooms on active floor are in cooldown
-                # but the other floor has selectable rooms
+                # Switch floor if there are no selectable rooms on the active floor
+                # but the other floor has selectable rooms and demand
                 if not self._has_selectable_rooms(active_floor):
                     other_floor = "FF" if active_floor == "GF" else "GF"
+                    active_demand = demand_gf if active_floor == "GF" else demand_ff
                     other_demand = demand_ff if other_floor == "FF" else demand_gf
                     if other_demand and self._has_selectable_rooms(other_floor):
                         self.log(
                             f"[DECISION] switching floor {active_floor}→{other_floor} "
-                            f"reason=all_rooms_cooldown on {active_floor}"
+                            f"reason=no_selectable_rooms on {active_floor} (active_demand={active_demand})"
                         )
                         active_floor = other_floor
 

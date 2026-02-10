@@ -314,6 +314,10 @@ class HeatOrchestrator(hass.Hass):
         r_min = max(1, int(self._param("input_number.lerp_rooms_min", 1.0)))
         r_max = max(1, int(self._param("input_number.lerp_rooms_max", 5.0)))
         
+        # Ensure r_max >= r_min to avoid counterintuitive behavior
+        if r_max < r_min:
+            r_min, r_max = r_max, r_min
+        
         if t_min >= t_max:
             return r_min  # safety: degenerate config
         
@@ -592,11 +596,16 @@ class HeatOrchestrator(hass.Hass):
             self.room_cooldown_until[room] = None
         return False
 
-    def _build_candidates(self, floor: str) -> list[str]:
+    def _build_candidates(self, floor: str, apply_side_effects: bool = True) -> list[str]:
         """Build list of rooms with demand that are eligible (not in cooldown).
         
-        Applies cooldown side effects when rooms exceed max continuous heating time.
-        Does not sort or apply LERP limits - just returns eligible rooms.
+        Args:
+            floor: "GF" or "FF"
+            apply_side_effects: If True, applies cooldown when rooms exceed max time.
+                               If False, only checks eligibility without side effects.
+        
+        Returns:
+            List of eligible rooms (not sorted, not LERP-limited).
         """
         rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
         now = self.datetime()
@@ -612,10 +621,11 @@ class HeatOrchestrator(hass.Hass):
             if heating_start is not None and self._is_room_heating(room):
                 elapsed_min = (now - heating_start).total_seconds() / 60.0
                 if elapsed_min >= self.max_continuous_heating_min:
-                    # Force cooldown
-                    cooldown_duration_min = self.min_state_duration
-                    self.room_cooldown_until[room] = now + datetime.timedelta(minutes=cooldown_duration_min)
-                    self.log(f"[ROOM] {room} forced cooldown after {elapsed_min:.0f}min continuous heating")
+                    # Only set cooldown if not already in cooldown (prevents log spam)
+                    if apply_side_effects and not self._is_room_in_cooldown(room, now):
+                        cooldown_duration_min = self.min_state_duration
+                        self.room_cooldown_until[room] = now + datetime.timedelta(minutes=cooldown_duration_min)
+                        self.log(f"[ROOM] {room} forced cooldown after {elapsed_min:.0f}min continuous heating")
             
             # Check if room is in cooldown (including just-set cooldown above)
             if self._is_room_in_cooldown(room, now):
@@ -628,11 +638,11 @@ class HeatOrchestrator(hass.Hass):
 
     def _has_selectable_rooms(self, floor: str) -> bool:
         """Check if a floor has any rooms with demand that are NOT in cooldown.
-
-        Uses _build_candidates to apply cooldown side effects consistently,
-        but avoids unnecessary sorting and LERP calculations.
+        
+        This is a pure predicate check without side effects - does not trigger
+        cooldown enforcement or logging. Used for floor-switching decisions.
         """
-        return bool(self._build_candidates(floor))
+        return bool(self._build_candidates(floor, apply_side_effects=False))
 
     def _select_rooms(self, floor: str) -> list[str]:
         """Select rooms to heat on the given floor.

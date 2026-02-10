@@ -69,6 +69,12 @@ class HeatOrchestrator(hass.Hass):
         # Track per-room cooldown expiry time
         self.room_cooldown_until: dict[str, datetime.datetime | None] = {r: None for r in ALL_ROOMS}
 
+        # Bootstrap heating start times for rooms already heating (e.g., after app restart)
+        for room in ALL_ROOMS:
+            if self._is_room_heating(room):
+                self.room_heating_start[room] = self.datetime()
+                self.log(f"[BOOTSTRAP] {room} already heating, setting start time to now")
+
         # --- Bootstrap user setpoints if empty ---
         self._bootstrap_user_setpoints()
 
@@ -384,6 +390,11 @@ class HeatOrchestrator(hass.Hass):
         # Check if we're already tracking this room to avoid redundant state queries
         if self.room_heating_start.get(room) is None:
             was_heating = self._is_room_heating(room)
+            # If the app (re)starts while the room is already heating, we have no
+            # start timestamp yet. Initialize it conservatively to "now" so that
+            # max-continuous-heating / cooldown logic can still operate.
+            if was_heating:
+                self.room_heating_start[room] = self.datetime()
         else:
             was_heating = True  # Already tracked, so it was heating
         
@@ -576,16 +587,20 @@ class HeatOrchestrator(hass.Hass):
         cooldown_until = self.room_cooldown_until.get(room)
         if cooldown_until and now < cooldown_until:
             return True
-        elif cooldown_until and now >= cooldown_until:
+        elif cooldown_until:
             # Cooldown expired, clear it
             self.room_cooldown_until[room] = None
         return False
 
-    def _select_rooms(self, floor: str) -> list[str]:
+    def _build_candidates(self, floor: str) -> list[str]:
+        """Build list of rooms with demand that are eligible (not in cooldown).
+        
+        Applies cooldown side effects when rooms exceed max continuous heating time.
+        Does not sort or apply LERP limits - just returns eligible rooms.
+        """
         rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
         now = self.datetime()
         
-        # Build candidate list with demand check, cooldown enforcement, and max time check
         candidates = []
         for room in rooms:
             # Check if room needs heat
@@ -608,7 +623,24 @@ class HeatOrchestrator(hass.Hass):
             
             # Room is eligible
             candidates.append(room)
+        
+        return candidates
 
+    def _has_selectable_rooms(self, floor: str) -> bool:
+        """Check if a floor has any rooms with demand that are NOT in cooldown.
+
+        Uses _build_candidates to apply cooldown side effects consistently,
+        but avoids unnecessary sorting and LERP calculations.
+        """
+        return bool(self._build_candidates(floor))
+
+    def _select_rooms(self, floor: str) -> list[str]:
+        """Select rooms to heat on the given floor.
+        
+        Returns sorted list of rooms, limited by LERP-based outdoor temperature calculation.
+        """
+        candidates = self._build_candidates(floor)
+        
         if not candidates:
             return []
 
@@ -627,6 +659,7 @@ class HeatOrchestrator(hass.Hass):
         max_rooms_lerp = self._lerp_max_rooms(t_out)
         
         # Clamp to floor room count
+        rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
         max_rooms_for_floor = len(rooms)
         max_rooms = min(max_rooms_lerp, max_rooms_for_floor)
         
@@ -756,13 +789,26 @@ class HeatOrchestrator(hass.Hass):
                 min_dur_ok = elapsed >= self.min_state_duration
 
             if min_dur_ok:
-                # Reconsider floor
+                # Reconsider floor based on scores
                 if active_floor == "GF" and score_ff > score_gf and demand_ff:
                     active_floor = "FF"
                     self.log(f"[DECISION] switching floor GF→FF (FF_score={score_ff:.1f} > GF_score={score_gf:.1f})")
                 elif active_floor == "FF" and score_gf > score_ff and demand_gf:
                     active_floor = "GF"
                     self.log(f"[DECISION] switching floor FF→GF (GF_score={score_gf:.1f} > FF_score={score_ff:.1f})")
+
+                # Switch floor if there are no selectable rooms on the active floor
+                # but the other floor has selectable rooms and demand
+                if not self._has_selectable_rooms(active_floor):
+                    other_floor = "FF" if active_floor == "GF" else "GF"
+                    active_demand = demand_gf if active_floor == "GF" else demand_ff
+                    other_demand = demand_ff if other_floor == "FF" else demand_gf
+                    if other_demand and self._has_selectable_rooms(other_floor):
+                        self.log(
+                            f"[DECISION] switching floor {active_floor}→{other_floor} "
+                            f"reason=no_selectable_rooms on {active_floor} (active_demand={active_demand})"
+                        )
+                        active_floor = other_floor
 
             new_state = STATE_HEAT_GF if active_floor == "GF" else STATE_HEAT_FF
             self._apply_floor(active_floor)

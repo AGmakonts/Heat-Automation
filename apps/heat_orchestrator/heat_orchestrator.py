@@ -576,7 +576,7 @@ class HeatOrchestrator(hass.Hass):
         cooldown_until = self.room_cooldown_until.get(room)
         if cooldown_until and now < cooldown_until:
             return True
-        elif cooldown_until and now >= cooldown_until:
+        elif cooldown_until:
             # Cooldown expired, clear it
             self.room_cooldown_until[room] = None
         return False

@@ -69,6 +69,12 @@ class HeatOrchestrator(hass.Hass):
         # Track per-room cooldown expiry time
         self.room_cooldown_until: dict[str, datetime.datetime | None] = {r: None for r in ALL_ROOMS}
 
+        # Bootstrap heating start times for rooms already heating (e.g., after app restart)
+        for room in ALL_ROOMS:
+            if self._is_room_heating(room):
+                self.room_heating_start[room] = self.datetime()
+                self.log(f"[BOOTSTRAP] {room} already heating, setting start time to now")
+
         # --- Bootstrap user setpoints if empty ---
         self._bootstrap_user_setpoints()
 
@@ -384,6 +390,11 @@ class HeatOrchestrator(hass.Hass):
         # Check if we're already tracking this room to avoid redundant state queries
         if self.room_heating_start.get(room) is None:
             was_heating = self._is_room_heating(room)
+            # If the app (re)starts while the room is already heating, we have no
+            # start timestamp yet. Initialize it conservatively to "now" so that
+            # max-continuous-heating / cooldown logic can still operate.
+            if was_heating:
+                self.room_heating_start[room] = self.datetime()
         else:
             was_heating = True  # Already tracked, so it was heating
         

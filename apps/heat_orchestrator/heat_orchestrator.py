@@ -468,9 +468,6 @@ class HeatOrchestrator(hass.Hass):
         self.run_in(self._release_guard, GUARD_RELEASE_DELAY, room=room)
 
     def _disable_room(self, room: str):
-        # Clear heating start time when disabling
-        self.room_heating_start[room] = None
-        
         entity = f"{CLIMATE_PREFIX}{room}"
         off_sp = self.room_off_setpoint
         current_sp = self._get_climate_setpoint(room)
@@ -639,13 +636,14 @@ class HeatOrchestrator(hass.Hass):
             
             # Check if room has exceeded max continuous heating time
             heating_start = self.room_heating_start.get(room)
-            if heating_start is not None and self._is_room_heating(room):
+            if heating_start is not None:
                 elapsed_min = (now - heating_start).total_seconds() / 60.0
                 if elapsed_min >= self.max_continuous_heating_min:
                     # Only set cooldown if not already in cooldown (prevents log spam)
                     if apply_side_effects and not self._is_room_in_cooldown(room, now):
                         cooldown_duration_min = self.min_state_duration
                         self.room_cooldown_until[room] = now + datetime.timedelta(minutes=cooldown_duration_min)
+                        self.room_heating_start[room] = None  # reset timer so it restarts after cooldown
                         self.log(f"[ROOM] {room} forced cooldown after {elapsed_min:.0f}min continuous heating")
             
             # Check if room is in cooldown (including just-set cooldown above)
@@ -706,9 +704,10 @@ class HeatOrchestrator(hass.Hass):
         self._set_number("input_number.pump_on_minutes_today", 0)
         self._set_number("input_number.pump_starts_today", 0)
         
-        # Clear all cooldown states
+        # Clear all cooldown states and heating start times
         for room in ALL_ROOMS:
             self.room_cooldown_until[room] = None
+            self.room_heating_start[room] = None
         
         self.log("[RESET] Daily counters zeroed and cooldown states cleared")
 
@@ -901,10 +900,13 @@ class HeatOrchestrator(hass.Hass):
 
         for room in inactive_rooms:
             self._disable_room(room)
+            # Clear heating timer when floor switches – room is no longer active
+            self.room_heating_start[room] = None
 
     def _disable_all_rooms(self):
         for room in ALL_ROOMS:
             self._disable_room(room)
+            self.room_heating_start[room] = None
 
     # -----------------------------------------------------------------------
     # Diagnostics

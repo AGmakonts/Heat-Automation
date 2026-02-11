@@ -404,7 +404,11 @@ class HeatOrchestrator(hass.Hass):
 
     def _get_heating_minutes(self, room: str) -> float:
         """Read accumulated heating minutes for a room from its HA helper."""
-        return self._get_number(f"{HEATING_MINUTES_PREFIX}{room}") or 0.0
+        val = self._get_number(f"{HEATING_MINUTES_PREFIX}{room}")
+        if val is None:
+            self.log(f"[WARN] heating_minutes helper missing for {room}", level="WARNING")
+            return 0.0
+        return val
 
     def _set_heating_minutes(self, room: str, value: float):
         """Set accumulated heating minutes for a room in its HA helper."""

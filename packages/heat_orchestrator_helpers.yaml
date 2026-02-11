@@ -57,7 +57,7 @@ input_number:
     unit_of_measurement: "°C"
     icon: mdi:thermometer
 
-  priority_salon:
+  priority_salon_2:
     name: "Priority – Salon"
     min: 1
     max: 100

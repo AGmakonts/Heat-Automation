@@ -97,7 +97,7 @@ Dla każdego pokoju `room_id` (np. `salon`, `sypialnia`):
 ### 3.2 Globalne parametry sterowania
 - `input_number.room_off_setpoint` (°C) = 7.0
 - `input_number.heating_hyst_on` (°C) – próg włączenia demand (np. 0.3)
-- `input_number.heating_hyst_off` (°C) – próg uznania za „dogrzane” (np. 0.1–0.2)
+- `input_number.heating_hyst_off` (°C) – próg powyżej setpointu, po przekroczeniu którego pokój uznawany jest za „dogrzany" (np. 0.1–0.2)
 - `input_number.min_state_duration_min` (min) – minimalny czas trzymania wybranego piętra/pokojów (np. 20–30)
 - `input_number.min_pump_on_min` (min) – minimalny czas pracy pompy przed wyłączeniem (np. 30–45)
 - `input_number.min_pump_off_min` (min) – minimalny czas postoju przed ponownym startem (np. 20–30)
@@ -157,7 +157,7 @@ Dla pokoju `r`:
 
 Definicje:
 - `need_heat(r) = (Tcur < Tuser - hon)`
-- `satisfied(r) = (Tcur >= Tuser - hoff)`
+- `satisfied(r) = (Tcur >= Tuser + hoff)`
 
 Dla piętra:
 - `need_heat_floor(F) = any(need_heat(r) for r in rooms(F))`

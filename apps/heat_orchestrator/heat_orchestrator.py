@@ -341,12 +341,12 @@ class HeatOrchestrator(hass.Hass):
         return t_cur < (t_user - self.hyst_on)
 
     def _satisfied(self, room: str) -> bool:
-        """Room is satisfied: Tcur >= Tuser - hyst_off."""
+        """Room is satisfied: Tcur >= Tuser + hyst_off."""
         t_cur = self._get_climate_current_temp(room)
         t_user = self._get_number(f"{USER_SP_PREFIX}{room}")
         if t_cur is None or t_user is None:
             return True
-        return t_cur >= (t_user - self.hyst_off)
+        return t_cur >= (t_user + self.hyst_off)
 
     def _need_heat_floor(self, floor: str) -> bool:
         rooms = GF_ROOMS if floor == "GF" else FF_ROOMS

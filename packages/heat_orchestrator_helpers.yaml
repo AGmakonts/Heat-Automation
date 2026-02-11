@@ -248,6 +248,72 @@ input_number:
     icon: mdi:timer-alert
 
   # ---------------------------------------------------------------------------
+  # Per-room accumulated heating minutes (for max continuous heating tracking)
+  # ---------------------------------------------------------------------------
+  heating_minutes_gabinet_ani:
+    name: "Heating Minutes – Gabinet Ani"
+    min: 0
+    max: 1440
+    step: 1
+    initial: 0
+    unit_of_measurement: "min"
+    icon: mdi:timer-sand
+
+  heating_minutes_lazienka_parter:
+    name: "Heating Minutes – Łazienka Parter"
+    min: 0
+    max: 1440
+    step: 1
+    initial: 0
+    unit_of_measurement: "min"
+    icon: mdi:timer-sand
+
+  heating_minutes_salon_2:
+    name: "Heating Minutes – Salon"
+    min: 0
+    max: 1440
+    step: 1
+    initial: 0
+    unit_of_measurement: "min"
+    icon: mdi:timer-sand
+
+  heating_minutes_sypialnia:
+    name: "Heating Minutes – Sypialnia"
+    min: 0
+    max: 1440
+    step: 1
+    initial: 0
+    unit_of_measurement: "min"
+    icon: mdi:timer-sand
+
+  heating_minutes_lazienka_pietro:
+    name: "Heating Minutes – Łazienka Piętro"
+    min: 0
+    max: 1440
+    step: 1
+    initial: 0
+    unit_of_measurement: "min"
+    icon: mdi:timer-sand
+
+  heating_minutes_pokoj_z_oknem_naroznym:
+    name: "Heating Minutes – Pokój z oknem narożnym"
+    min: 0
+    max: 1440
+    step: 1
+    initial: 0
+    unit_of_measurement: "min"
+    icon: mdi:timer-sand
+
+  heating_minutes_pokoj_z_tarasem:
+    name: "Heating Minutes – Pokój z tarasem"
+    min: 0
+    max: 1440
+    step: 1
+    initial: 0
+    unit_of_measurement: "min"
+    icon: mdi:timer-sand
+
+  # ---------------------------------------------------------------------------
   # LERP-based room selection parameters
   # ---------------------------------------------------------------------------
   lerp_temp_min:

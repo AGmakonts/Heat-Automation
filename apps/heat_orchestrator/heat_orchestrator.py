@@ -24,6 +24,7 @@ CLIMATE_PREFIX = "climate."
 USER_SP_PREFIX = "input_number.user_sp_"
 PRIORITY_PREFIX = "input_number.priority_"
 HEATING_PREFIX = "input_boolean.heating_"
+HEATING_MINUTES_PREFIX = "input_number.heating_minutes_"
 
 PUMP_SWITCH = "switch.sonoff_10017fadeb"
 PUMP_OFF_BUTTON = "input_button.wylacznik_pompy"
@@ -63,17 +64,8 @@ class HeatOrchestrator(hass.Hass):
         self._log_every_n_ticks: int = 5
         self._tick_counter: int = 0
 
-        # Track per-room continuous heating start time
-        self.room_heating_start: dict[str, datetime.datetime | None] = {r: None for r in ALL_ROOMS}
-
         # Track per-room cooldown expiry time
         self.room_cooldown_until: dict[str, datetime.datetime | None] = {r: None for r in ALL_ROOMS}
-
-        # Bootstrap heating start times for rooms already heating (e.g., after app restart)
-        for room in ALL_ROOMS:
-            if self._is_room_heating(room):
-                self.room_heating_start[room] = self.datetime()
-                self.log(f"[BOOTSTRAP] {room} already heating, setting start time to now")
 
         # --- Bootstrap user setpoints if empty ---
         self._bootstrap_user_setpoints()
@@ -410,19 +402,23 @@ class HeatOrchestrator(hass.Hass):
         except Exception:
             return False
 
+    def _get_heating_minutes(self, room: str) -> float:
+        """Read accumulated heating minutes for a room from its HA helper."""
+        val = self._get_number(f"{HEATING_MINUTES_PREFIX}{room}")
+        if val is None:
+            self.log(f"[WARN] heating_minutes helper missing for {room}", level="WARNING")
+            return 0.0
+        return val
+
+    def _set_heating_minutes(self, room: str, value: float):
+        """Set accumulated heating minutes for a room in its HA helper."""
+        self._set_number(f"{HEATING_MINUTES_PREFIX}{room}", max(0.0, value))
+
+    def _reset_heating_minutes(self, room: str):
+        """Reset accumulated heating minutes for a room to zero."""
+        self._set_heating_minutes(room, 0)
+
     def _enable_room(self, room: str):
-        # Track heating start time if room was not previously heating
-        # Check if we're already tracking this room to avoid redundant state queries
-        if self.room_heating_start.get(room) is None:
-            was_heating = self._is_room_heating(room)
-            # If the app (re)starts while the room is already heating, we have no
-            # start timestamp yet. Initialize it conservatively to "now" so that
-            # max-continuous-heating / cooldown logic can still operate.
-            if was_heating:
-                self.room_heating_start[room] = self.datetime()
-        else:
-            was_heating = True  # Already tracked, so it was heating
-        
         t_user = self._get_number(f"{USER_SP_PREFIX}{room}")
         if t_user is None or t_user < 5.0 or t_user > 30.0:
             climate_sp = self._get_climate_setpoint(room)
@@ -435,9 +431,6 @@ class HeatOrchestrator(hass.Hass):
         current_sp = self._get_climate_setpoint(room)
         if current_sp is not None and abs(current_sp - t_user) < 0.05:
             self._set_heating_sensor(room, True)
-            # Record start time if newly enabled
-            if not was_heating and self.room_heating_start.get(room) is None:
-                self.room_heating_start[room] = self.datetime()
             return  # already correct
 
         self.automation_guard[room] = True
@@ -447,9 +440,6 @@ class HeatOrchestrator(hass.Hass):
             )
             self.log(f"[ROOM] enable {room} → {t_user}°C")
             self._set_heating_sensor(room, True)
-            # Record start time if newly enabled
-            if not was_heating and self.room_heating_start.get(room) is None:
-                self.room_heating_start[room] = self.datetime()
         except Exception as e:
             self.log(f"[ERROR] enable_room {room}: {e}", level="ERROR")
             # Retry once
@@ -458,9 +448,6 @@ class HeatOrchestrator(hass.Hass):
                     "climate/set_temperature", entity_id=entity, temperature=t_user
                 )
                 self._set_heating_sensor(room, True)
-                # Record start time if newly enabled
-                if not was_heating and self.room_heating_start.get(room) is None:
-                    self.room_heating_start[room] = self.datetime()
             except Exception as e2:
                 self.log(f"[ERROR] enable_room {room} retry failed: {e2}", level="ERROR")
                 self.unmanaged_rooms[room] = self.datetime()
@@ -468,9 +455,6 @@ class HeatOrchestrator(hass.Hass):
         self.run_in(self._release_guard, GUARD_RELEASE_DELAY, room=room)
 
     def _disable_room(self, room: str):
-        # Clear heating start time when disabling
-        self.room_heating_start[room] = None
-        
         entity = f"{CLIMATE_PREFIX}{room}"
         off_sp = self.room_off_setpoint
         current_sp = self._get_climate_setpoint(room)
@@ -638,17 +622,18 @@ class HeatOrchestrator(hass.Hass):
                 continue
             
             # Check if room has exceeded max continuous heating time
-            heating_start = self.room_heating_start.get(room)
-            if heating_start is not None and self._is_room_heating(room):
-                elapsed_min = (now - heating_start).total_seconds() / 60.0
-                if elapsed_min >= self.max_continuous_heating_min:
-                    # Only set cooldown if not already in cooldown (prevents log spam)
-                    if apply_side_effects and not self._is_room_in_cooldown(room, now):
-                        cooldown_duration_min = self.min_state_duration
-                        self.room_cooldown_until[room] = now + datetime.timedelta(minutes=cooldown_duration_min)
-                        self.log(f"[ROOM] {room} forced cooldown after {elapsed_min:.0f}min continuous heating")
+            heating_min = self._get_heating_minutes(room)
+            if heating_min >= self.max_continuous_heating_min:
+                # Apply cooldown/reset/logging only when side effects are enabled
+                if apply_side_effects and not self._is_room_in_cooldown(room, now):
+                    cooldown_duration_min = self.min_state_duration
+                    self.room_cooldown_until[room] = now + datetime.timedelta(minutes=cooldown_duration_min)
+                    self._reset_heating_minutes(room)
+                    self.log(f"[ROOM] {room} forced cooldown after {heating_min:.0f}min continuous heating")
+                # Always exclude rooms that exceeded max heating time
+                continue
             
-            # Check if room is in cooldown (including just-set cooldown above)
+            # Check if room is in cooldown
             if self._is_room_in_cooldown(room, now):
                 continue
             
@@ -706,11 +691,12 @@ class HeatOrchestrator(hass.Hass):
         self._set_number("input_number.pump_on_minutes_today", 0)
         self._set_number("input_number.pump_starts_today", 0)
         
-        # Clear all cooldown states
+        # Clear all cooldown states and heating minute counters
         for room in ALL_ROOMS:
             self.room_cooldown_until[room] = None
+            self._reset_heating_minutes(room)
         
-        self.log("[RESET] Daily counters zeroed and cooldown states cleared")
+        self.log("[RESET] Daily counters zeroed, cooldown states and heating minutes cleared")
 
     # -----------------------------------------------------------------------
     # Main tick
@@ -724,6 +710,12 @@ class HeatOrchestrator(hass.Hass):
         if self._pump_is_on():
             on_min = self._get_number("input_number.pump_on_minutes_today") or 0.0
             self._set_number("input_number.pump_on_minutes_today", on_min + 1)
+
+        # --- Per-room heating minutes accounting ---
+        for room in ALL_ROOMS:
+            if self._is_room_heating(room):
+                mins = self._get_heating_minutes(room)
+                self._set_heating_minutes(room, mins + 1)
 
         # --- 1. OFF window check ---
         if self._in_off_window(now):
@@ -901,10 +893,12 @@ class HeatOrchestrator(hass.Hass):
 
         for room in inactive_rooms:
             self._disable_room(room)
+            self._reset_heating_minutes(room)
 
     def _disable_all_rooms(self):
         for room in ALL_ROOMS:
             self._disable_room(room)
+            self._reset_heating_minutes(room)
 
     # -----------------------------------------------------------------------
     # Diagnostics

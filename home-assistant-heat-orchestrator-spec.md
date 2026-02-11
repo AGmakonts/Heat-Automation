@@ -80,6 +80,10 @@ Dla każdego pokoju `room_id` (np. `salon`, `sypialnia`):
 - `input_number.user_sp_<room_id>` – zapamiętany setpoint użytkownika (°C)
   - zakres: 5..30, krok: 0.5
 - `input_number.priority_<room_id>` – priorytet (1..100)
+- `input_number.heating_minutes_<room_id>` – skumulowany czas grzania pokoju (min)
+  - zakres: 0..1440, krok: 1
+  - inkrementowany co tick (+1 min) gdy pokój jest aktywnie grzany
+  - resetowany: przy cooldown, przełączeniu piętra, wyłączeniu wszystkich pokoi, daily reset
 
 **Lista `room_id`**
 - `gabinet_ani`
@@ -209,21 +213,28 @@ Tryb:
 - System nigdy nie przekroczy liczby pokoi dostępnych na danym piętrze (max 3 dla GF, max 4 dla FF)
 
 ### 6.3 Maksymalny czas ciągłego grzania pokoju
-Wymagany helper:
+Wymagane helpery:
 - `input_number.max_continuous_heating_min` (min) – np. 120 (maksymalny czas ciągłego grzania jednego pokoju)
+- `input_number.heating_minutes_<room_id>` (min) – skumulowany czas grzania per pokój (przechowywany w HA, przetrwa restart AppDaemon)
 
 Logika:
 - Dla każdego pokoju śledzone są:
-  - `room_heating_start[room]` – timestamp rozpoczęcia grzania (gdy `_enable_room()` został wywołany i pokój nie był wcześniej grzany)
-  - `room_cooldown_until[room]` – timestamp końca okresu cooldown
-- Gdy pokój jest grzany nieprzerwanie przez ≥ `max_continuous_heating_min`:
+  - `input_number.heating_minutes_<room_id>` – skumulowany czas grzania (min), inkrementowany co tick (+1) gdy pokój jest aktywnie grzany (`_is_room_heating()`)
+  - `room_cooldown_until[room]` – timestamp końca okresu cooldown (in-memory)
+- Gdy `heating_minutes >= max_continuous_heating_min`:
   - Pokój jest **wyłączany z listy kandydatów** w `_select_rooms()`
   - Pokój wchodzi w **cooldown** na czas = `min_state_duration_min`
+  - Licznik `heating_minutes` jest **resetowany do 0**
   - Log: `[ROOM] {room} forced cooldown after {minutes}min continuous heating`
   - **Ważne:** Pokój nadal zwraca `need_heat()=True` (aby poprawnie obliczać demand na piętrze i nie tracić demand floor)
 - Po zakończeniu cooldown pokój znów staje się dostępny do wyboru
-- `_disable_room()` czyści `room_heating_start[room]` (resetuje licznik)
-- Daily reset czyści wszystkie stany cooldown
+- **Ważne:** `_disable_room()` **NIE** resetuje licznika `heating_minutes` – dzięki temu pokój tymczasowo wyłączony (np. po osiągnięciu temperatury docelowej) zachowuje swój skumulowany czas grzania
+- Licznik `heating_minutes` jest resetowany do 0 w następujących sytuacjach:
+  - Przy wejściu w **cooldown** (timer restartuje po zakończeniu cooldown)
+  - Przy **przełączeniu piętra** (pokoje na nieaktywnym piętrze)
+  - Przy **wyłączeniu wszystkich pokoi** (DHW_QUOTA, OFF, OFF_LOCKOUT)
+  - Przy **daily reset**
+- Licznik przetrwa restart AppDaemon (przechowywany jako HA helper)
 
 Scenariusz:
 - Jeśli wszystkie pokoje na aktywnym piętrze są w cooldown, ale drugie piętro ma demand → system może przełączyć piętro (jeśli `min_state_duration` pozwala)

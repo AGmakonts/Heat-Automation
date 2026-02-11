@@ -624,14 +624,16 @@ class HeatOrchestrator(hass.Hass):
             # Check if room has exceeded max continuous heating time
             heating_min = self._get_heating_minutes(room)
             if heating_min >= self.max_continuous_heating_min:
-                # Only set cooldown if not already in cooldown (prevents log spam)
+                # Apply cooldown/reset/logging only when side effects are enabled
                 if apply_side_effects and not self._is_room_in_cooldown(room, now):
                     cooldown_duration_min = self.min_state_duration
                     self.room_cooldown_until[room] = now + datetime.timedelta(minutes=cooldown_duration_min)
                     self._reset_heating_minutes(room)
                     self.log(f"[ROOM] {room} forced cooldown after {heating_min:.0f}min continuous heating")
+                # Always exclude rooms that exceeded max heating time
+                continue
             
-            # Check if room is in cooldown (including just-set cooldown above)
+            # Check if room is in cooldown
             if self._is_room_in_cooldown(room, now):
                 continue
             

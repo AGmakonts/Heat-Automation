@@ -358,7 +358,28 @@ class HeatOrchestrator(hass.Hass):
 
     def _need_heat_floor(self, floor: str) -> bool:
         rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
-        return any(self._need_heat(r) for r in rooms)
+        return any(self._has_demand(r) for r in rooms)
+
+    def _has_demand(self, room: str) -> bool:
+        """Hysteresis-aware demand check.
+        
+        For rooms already heating: keep heating until satisfied (offset threshold).
+        For rooms not heating: only start if need_heat (onset threshold).
+        This creates the proper two-threshold hysteresis band.
+        """
+        # Respect unmanaged room timeout
+        if room in self.unmanaged_rooms:
+            if self.datetime() - self.unmanaged_rooms[room] < datetime.timedelta(minutes=15):
+                return False
+            else:
+                del self.unmanaged_rooms[room]
+
+        if self._is_room_heating(room):
+            # Currently heating → keep going until satisfied (offset threshold)
+            return not self._satisfied(room)
+        else:
+            # Not heating → only start at onset threshold
+            return self._need_heat(room)
 
     # -----------------------------------------------------------------------
     # Scoring
@@ -374,7 +395,7 @@ class HeatOrchestrator(hass.Hass):
 
     def _floor_score(self, floor: str) -> float:
         rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
-        scores = [self._room_score(r) for r in rooms if self._need_heat(r)]
+        scores = [self._room_score(r) for r in rooms if self._has_demand(r)]
         return max(scores) if scores else 0.0
 
     # -----------------------------------------------------------------------
@@ -613,7 +634,7 @@ class HeatOrchestrator(hass.Hass):
         candidates = []
         for room in rooms:
             # Check if room needs heat
-            if not self._need_heat(room):
+            if not self._has_demand(room):
                 continue
             
             # Check if room has exceeded max continuous heating time

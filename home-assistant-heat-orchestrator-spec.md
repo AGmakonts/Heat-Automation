@@ -222,13 +222,8 @@ Logika:
   - Log: `[ROOM] {room} forced cooldown after {minutes}min continuous heating`
   - **Ważne:** Pokój nadal zwraca `need_heat()=True` (aby poprawnie obliczać demand na piętrze i nie tracić demand floor)
 - Po zakończeniu cooldown pokój znów staje się dostępny do wyboru
-- `room_heating_start[room]` jest czyszczony w następujących sytuacjach:
-  - Przy wejściu w **cooldown** (timer restartuje po zakończeniu cooldown)
-  - Przy **przełączeniu piętra** (pokoje na nieaktywnym piętrze)
-  - Przy **wyłączeniu wszystkich pokoi** (DHW_QUOTA, OFF, OFF_LOCKOUT)
-  - Przy **daily reset**
-- **Ważne:** `_disable_room()` **NIE** czyści `room_heating_start[room]` – dzięki temu pokój tymczasowo wyłączony (np. po osiągnięciu temperatury docelowej) zachowuje swój skumulowany czas grzania i nie omija limitu `max_continuous_heating_min` po ponownym włączeniu
-- Daily reset czyści wszystkie stany cooldown i heating start
+- `_disable_room()` czyści `room_heating_start[room]` (resetuje licznik)
+- Daily reset czyści wszystkie stany cooldown
 
 Scenariusz:
 - Jeśli wszystkie pokoje na aktywnym piętrze są w cooldown, ale drugie piętro ma demand → system może przełączyć piętro (jeśli `min_state_duration` pozwala)

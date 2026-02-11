@@ -1,6 +1,6 @@
 # Home Assistant – Heat Orchestrator (AppDaemon, Python) – Specyfikacja implementacyjna
 
-Data: 2026-02-09  
+Data: 2026-02-10  
 Cel: dokument jest „kontraktem” dla agentów AI implementujących sterownik ogrzewania w Pythonie (AppDaemon) dla Home Assistant.
 
 ---
@@ -169,16 +169,64 @@ Funkcja `get_outdoor_temp()`:
    - call service `weather.get_forecasts` (type=`hourly`, target=`weather.forecast_home`)
    - `temp = response["weather.forecast_home"]["forecast"][0]["temperature"]`
 
-### 6.2 Progi trybu
-Wymagane helpers:
+### 6.2 Progi trybu (LERP-based)
+Wymagane helpers (LERP):
+- `input_number.lerp_temp_min` (°C) – np. -10 (temperatura dla minimum pokoi)
+- `input_number.lerp_temp_max` (°C) – np. +10 (temperatura dla maksimum pokoi)
+- `input_number.lerp_rooms_min` – np. 1 (minimalna liczba pokoi do grzania)
+- `input_number.lerp_rooms_max` – np. 5 (maksymalna liczba pokoi do grzania)
+
+Helpers zachowane dla kompatybilności (ale nie używane w głównej logice):
 - `input_number.bulk_mode_temp` (°C) – np. +5
 - `input_number.sequential_mode_temp` (°C) – np. -5
 - `input_number.max_rooms_limited` – np. 2
 
+Funkcja LERP:
+```python
+def _lerp_max_rooms(t_out):
+    t_min = lerp_temp_min  # domyślnie -10
+    t_max = lerp_temp_max  # domyślnie +10
+    r_min = lerp_rooms_min  # domyślnie 1
+    r_max = lerp_rooms_max  # domyślnie 5
+    
+    if t_min >= t_max:
+        return r_min  # degenerate config
+    
+    if t_out <= t_min:
+        return r_min
+    if t_out >= t_max:
+        return r_max
+    
+    # Linear interpolation
+    frac = (t_out - t_min) / (t_max - t_min)
+    result = r_min + frac * (r_max - r_min)
+    return max(r_min, int(result))  # floor, conservative
+```
+
 Tryb:
-- `T_out >= bulk_mode_temp` → otwieraj wszystkie pokoje z `need_heat` na aktywnym piętrze.
-- `T_out <= sequential_mode_temp` → otwieraj **1** pokój (najwyższy score).
-- Inaczej → otwieraj **N** pokoi (top N), gdzie `N=max_rooms_limited`.
+- Liczba pokoi do grzania = `min(lerp_max_rooms(T_out), liczba pokoi na piętrze, liczba kandydatów z demand)`
+- Wybór pokoi następuje po sortowaniu według priority desc, deficit desc
+- System nigdy nie przekroczy liczby pokoi dostępnych na danym piętrze (max 3 dla GF, max 4 dla FF)
+
+### 6.3 Maksymalny czas ciągłego grzania pokoju
+Wymagany helper:
+- `input_number.max_continuous_heating_min` (min) – np. 120 (maksymalny czas ciągłego grzania jednego pokoju)
+
+Logika:
+- Dla każdego pokoju śledzone są:
+  - `room_heating_start[room]` – timestamp rozpoczęcia grzania (gdy `_enable_room()` został wywołany i pokój nie był wcześniej grzany)
+  - `room_cooldown_until[room]` – timestamp końca okresu cooldown
+- Gdy pokój jest grzany nieprzerwanie przez ≥ `max_continuous_heating_min`:
+  - Pokój jest **wyłączany z listy kandydatów** w `_select_rooms()`
+  - Pokój wchodzi w **cooldown** na czas = `min_state_duration_min`
+  - Log: `[ROOM] {room} forced cooldown after {minutes}min continuous heating`
+  - **Ważne:** Pokój nadal zwraca `need_heat()=True` (aby poprawnie obliczać demand na piętrze i nie tracić demand floor)
+- Po zakończeniu cooldown pokój znów staje się dostępny do wyboru
+- `_disable_room()` czyści `room_heating_start[room]` (resetuje licznik)
+- Daily reset czyści wszystkie stany cooldown
+
+Scenariusz:
+- Jeśli wszystkie pokoje na aktywnym piętrze są w cooldown, ale drugie piętro ma demand → system może przełączyć piętro (jeśli `min_state_duration` pozwala)
 
 ---
 

@@ -5,7 +5,7 @@ Controls underfloor heating with a heat pump, managing floor selection (GF/FF),
 room-level valve control via thermostats, pump on/off logic, DHW quota,
 and nightly off-window enforcement.
 
-Spec version: 2026-02-09
+Spec version: 2026-02-10
 """
 
 from __future__ import annotations
@@ -62,6 +62,18 @@ class HeatOrchestrator(hass.Hass):
         self._last_logged_state: str | None = None
         self._log_every_n_ticks: int = 5
         self._tick_counter: int = 0
+
+        # Track per-room continuous heating start time
+        self.room_heating_start: dict[str, datetime.datetime | None] = {r: None for r in ALL_ROOMS}
+
+        # Track per-room cooldown expiry time
+        self.room_cooldown_until: dict[str, datetime.datetime | None] = {r: None for r in ALL_ROOMS}
+
+        # Bootstrap heating start times for rooms already heating (e.g., after app restart)
+        for room in ALL_ROOMS:
+            if self._is_room_heating(room):
+                self.room_heating_start[room] = self.datetime()
+                self.log(f"[BOOTSTRAP] {room} already heating, setting start time to now")
 
         # --- Bootstrap user setpoints if empty ---
         self._bootstrap_user_setpoints()
@@ -223,6 +235,10 @@ class HeatOrchestrator(hass.Hass):
         val = self._param("input_number.max_rooms_limited", 2.0)
         return max(1, int(val))
 
+    @property
+    def max_continuous_heating_min(self) -> float:
+        return self._param("input_number.max_continuous_heating_min", 120.0)
+
     # -----------------------------------------------------------------------
     # OFF window
     # -----------------------------------------------------------------------
@@ -289,6 +305,33 @@ class HeatOrchestrator(hass.Hass):
         return 0.0
 
     # -----------------------------------------------------------------------
+    # LERP-based room count calculation
+    # -----------------------------------------------------------------------
+    def _lerp_max_rooms(self, t_out: float) -> int:
+        """Calculate max rooms to heat based on outdoor temperature using LERP."""
+        t_min = self._param("input_number.lerp_temp_min", -10.0)
+        t_max = self._param("input_number.lerp_temp_max", 10.0)
+        r_min = max(1, int(self._param("input_number.lerp_rooms_min", 1.0)))
+        r_max = max(1, int(self._param("input_number.lerp_rooms_max", 5.0)))
+        
+        # Ensure r_max >= r_min to avoid counterintuitive behavior
+        if r_max < r_min:
+            r_min, r_max = r_max, r_min
+        
+        if t_min >= t_max:
+            return r_min  # safety: degenerate config
+        
+        if t_out <= t_min:
+            return r_min
+        if t_out >= t_max:
+            return r_max
+        
+        # Linear interpolation
+        frac = (t_out - t_min) / (t_max - t_min)
+        result = r_min + frac * (r_max - r_min)
+        return max(r_min, int(result))  # floor, not round — conservative
+
+    # -----------------------------------------------------------------------
     # Demand model
     # -----------------------------------------------------------------------
     def _need_heat(self, room: str) -> bool:
@@ -337,7 +380,28 @@ class HeatOrchestrator(hass.Hass):
     # -----------------------------------------------------------------------
     # Room enable / disable
     # -----------------------------------------------------------------------
+    def _is_room_heating(self, room: str) -> bool:
+        """Check if a room is currently being heated (heating sensor is on)."""
+        entity = self._HEATING_ENTITY_OVERRIDES.get(room, f"{HEATING_PREFIX}{room}")
+        try:
+            state = self.get_state(entity)
+            return state == "on"
+        except Exception:
+            return False
+
     def _enable_room(self, room: str):
+        # Track heating start time if room was not previously heating
+        # Check if we're already tracking this room to avoid redundant state queries
+        if self.room_heating_start.get(room) is None:
+            was_heating = self._is_room_heating(room)
+            # If the app (re)starts while the room is already heating, we have no
+            # start timestamp yet. Initialize it conservatively to "now" so that
+            # max-continuous-heating / cooldown logic can still operate.
+            if was_heating:
+                self.room_heating_start[room] = self.datetime()
+        else:
+            was_heating = True  # Already tracked, so it was heating
+        
         t_user = self._get_number(f"{USER_SP_PREFIX}{room}")
         if t_user is None or t_user < 5.0 or t_user > 30.0:
             climate_sp = self._get_climate_setpoint(room)
@@ -350,6 +414,9 @@ class HeatOrchestrator(hass.Hass):
         current_sp = self._get_climate_setpoint(room)
         if current_sp is not None and abs(current_sp - t_user) < 0.05:
             self._set_heating_sensor(room, True)
+            # Record start time if newly enabled
+            if not was_heating and self.room_heating_start.get(room) is None:
+                self.room_heating_start[room] = self.datetime()
             return  # already correct
 
         self.automation_guard[room] = True
@@ -359,6 +426,9 @@ class HeatOrchestrator(hass.Hass):
             )
             self.log(f"[ROOM] enable {room} → {t_user}°C")
             self._set_heating_sensor(room, True)
+            # Record start time if newly enabled
+            if not was_heating and self.room_heating_start.get(room) is None:
+                self.room_heating_start[room] = self.datetime()
         except Exception as e:
             self.log(f"[ERROR] enable_room {room}: {e}", level="ERROR")
             # Retry once
@@ -367,6 +437,9 @@ class HeatOrchestrator(hass.Hass):
                     "climate/set_temperature", entity_id=entity, temperature=t_user
                 )
                 self._set_heating_sensor(room, True)
+                # Record start time if newly enabled
+                if not was_heating and self.room_heating_start.get(room) is None:
+                    self.room_heating_start[room] = self.datetime()
             except Exception as e2:
                 self.log(f"[ERROR] enable_room {room} retry failed: {e2}", level="ERROR")
                 self.unmanaged_rooms[room] = self.datetime()
@@ -374,6 +447,9 @@ class HeatOrchestrator(hass.Hass):
         self.run_in(self._release_guard, GUARD_RELEASE_DELAY, room=room)
 
     def _disable_room(self, room: str):
+        # Clear heating start time when disabling
+        self.room_heating_start[room] = None
+        
         entity = f"{CLIMATE_PREFIX}{room}"
         off_sp = self.room_off_setpoint
         current_sp = self._get_climate_setpoint(room)
@@ -508,12 +584,73 @@ class HeatOrchestrator(hass.Hass):
         return max(0.0, quota_min - on_today)
 
     # -----------------------------------------------------------------------
-    # Room selection per mode (bulk / sequential / limited)
+    # Room selection per mode (LERP-based)
     # -----------------------------------------------------------------------
-    def _select_rooms(self, floor: str) -> list[str]:
-        rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
-        candidates = [r for r in rooms if self._need_heat(r)]
+    def _is_room_in_cooldown(self, room: str, now: datetime.datetime) -> bool:
+        """Check if a room is currently in cooldown."""
+        cooldown_until = self.room_cooldown_until.get(room)
+        if cooldown_until and now < cooldown_until:
+            return True
+        elif cooldown_until:
+            # Cooldown expired, clear it
+            self.room_cooldown_until[room] = None
+        return False
 
+    def _build_candidates(self, floor: str, apply_side_effects: bool = True) -> list[str]:
+        """Build list of rooms with demand that are eligible (not in cooldown).
+        
+        Args:
+            floor: "GF" or "FF"
+            apply_side_effects: If True, applies cooldown when rooms exceed max time.
+                               If False, only checks eligibility without side effects.
+        
+        Returns:
+            List of eligible rooms (not sorted, not LERP-limited).
+        """
+        rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
+        now = self.datetime()
+        
+        candidates = []
+        for room in rooms:
+            # Check if room needs heat
+            if not self._need_heat(room):
+                continue
+            
+            # Check if room has exceeded max continuous heating time
+            heating_start = self.room_heating_start.get(room)
+            if heating_start is not None and self._is_room_heating(room):
+                elapsed_min = (now - heating_start).total_seconds() / 60.0
+                if elapsed_min >= self.max_continuous_heating_min:
+                    # Only set cooldown if not already in cooldown (prevents log spam)
+                    if apply_side_effects and not self._is_room_in_cooldown(room, now):
+                        cooldown_duration_min = self.min_state_duration
+                        self.room_cooldown_until[room] = now + datetime.timedelta(minutes=cooldown_duration_min)
+                        self.log(f"[ROOM] {room} forced cooldown after {elapsed_min:.0f}min continuous heating")
+            
+            # Check if room is in cooldown (including just-set cooldown above)
+            if self._is_room_in_cooldown(room, now):
+                continue
+            
+            # Room is eligible
+            candidates.append(room)
+        
+        return candidates
+
+    def _has_selectable_rooms(self, floor: str) -> bool:
+        """Check if a floor has any rooms with demand that are NOT in cooldown.
+        
+        This is a pure predicate check without side effects - does not trigger
+        cooldown enforcement or logging. Used for floor-switching decisions.
+        """
+        return bool(self._build_candidates(floor, apply_side_effects=False))
+
+    def _select_rooms(self, floor: str) -> list[str]:
+        """Select rooms to heat on the given floor.
+        
+        Returns sorted list of rooms, limited by LERP-based outdoor temperature calculation.
+        """
+        candidates = self._build_candidates(floor)
+        
         if not candidates:
             return []
 
@@ -527,17 +664,19 @@ class HeatOrchestrator(hass.Hass):
 
         candidates.sort(key=sort_key)
 
+        # Use LERP to determine max rooms
         t_out = self._get_outdoor_temp()
-
-        if t_out >= self.bulk_mode_temp:
-            # Bulk mode: all rooms with demand
-            return candidates
-        elif t_out <= self.sequential_mode_temp:
-            # Sequential: only 1 room
-            return candidates[:1]
-        else:
-            # Limited mode
-            return candidates[: self.max_rooms_limited]
+        max_rooms_lerp = self._lerp_max_rooms(t_out)
+        
+        # Clamp to floor room count
+        rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
+        max_rooms_for_floor = len(rooms)
+        max_rooms = min(max_rooms_lerp, max_rooms_for_floor)
+        
+        # Clamp to candidate count
+        max_rooms = min(max_rooms, len(candidates))
+        
+        return candidates[:max_rooms]
 
     # -----------------------------------------------------------------------
     # Daily reset
@@ -545,7 +684,12 @@ class HeatOrchestrator(hass.Hass):
     def _daily_reset(self, **kwargs):
         self._set_number("input_number.pump_on_minutes_today", 0)
         self._set_number("input_number.pump_starts_today", 0)
-        self.log("[RESET] Daily counters zeroed")
+        
+        # Clear all cooldown states
+        for room in ALL_ROOMS:
+            self.room_cooldown_until[room] = None
+        
+        self.log("[RESET] Daily counters zeroed and cooldown states cleared")
 
     # -----------------------------------------------------------------------
     # Main tick
@@ -655,13 +799,26 @@ class HeatOrchestrator(hass.Hass):
                 min_dur_ok = elapsed >= self.min_state_duration
 
             if min_dur_ok:
-                # Reconsider floor
+                # Reconsider floor based on scores
                 if active_floor == "GF" and score_ff > score_gf and demand_ff:
                     active_floor = "FF"
                     self.log(f"[DECISION] switching floor GF→FF (FF_score={score_ff:.1f} > GF_score={score_gf:.1f})")
                 elif active_floor == "FF" and score_gf > score_ff and demand_gf:
                     active_floor = "GF"
                     self.log(f"[DECISION] switching floor FF→GF (GF_score={score_gf:.1f} > FF_score={score_ff:.1f})")
+
+                # Switch floor if there are no selectable rooms on the active floor
+                # but the other floor has selectable rooms and demand
+                if not self._has_selectable_rooms(active_floor):
+                    other_floor = "FF" if active_floor == "GF" else "GF"
+                    active_demand = demand_gf if active_floor == "GF" else demand_ff
+                    other_demand = demand_ff if other_floor == "FF" else demand_gf
+                    if other_demand and self._has_selectable_rooms(other_floor):
+                        self.log(
+                            f"[DECISION] switching floor {active_floor}→{other_floor} "
+                            f"reason=no_selectable_rooms on {active_floor} (active_demand={active_demand})"
+                        )
+                        active_floor = other_floor
 
             new_state = STATE_HEAT_GF if active_floor == "GF" else STATE_HEAT_FF
             self._apply_floor(active_floor)

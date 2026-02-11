@@ -643,7 +643,7 @@ class HeatOrchestrator(hass.Hass):
                     if apply_side_effects and not self._is_room_in_cooldown(room, now):
                         cooldown_duration_min = self.min_state_duration
                         self.room_cooldown_until[room] = now + datetime.timedelta(minutes=cooldown_duration_min)
-                        self.room_heating_start[room] = None  # reset timer so it restarts after cooldown
+                        self.room_heating_start[room] = None  # clear timer; will be set fresh when room is re-enabled after cooldown
                         self.log(f"[ROOM] {room} forced cooldown after {elapsed_min:.0f}min continuous heating")
             
             # Check if room is in cooldown (including just-set cooldown above)

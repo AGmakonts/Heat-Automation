@@ -105,7 +105,9 @@ class HeatOrchestrator(hass.Hass):
             current_val = self._get_number(sp_entity)
             if current_val is None or current_val < 5.0:
                 climate_sp = self._get_climate_setpoint(room)
-                if climate_sp is not None and 5.0 <= climate_sp <= 30.0:
+                off_sp = self.room_off_setpoint
+                # Exclude room_off_setpoint to avoid capturing disabled rooms
+                if climate_sp is not None and 15.0 <= climate_sp <= 30.0 and abs(climate_sp - off_sp) > 0.1:
                     self._set_number(sp_entity, climate_sp)
                     self.log(f"[BOOTSTRAP] {sp_entity} seeded with {climate_sp}")
                 else:

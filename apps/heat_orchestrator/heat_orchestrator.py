@@ -39,6 +39,18 @@ STATE_DHW_QUOTA = "DHW_QUOTA"
 
 GUARD_RELEASE_DELAY = 2  # seconds
 
+# Offset added to the user setpoint when writing the thermostat target.
+# Room thermostats close the valve once current temperature is within ~0.5°C
+# of their target. To avoid the valve closing while the orchestrator still
+# considers the room as heating (which wastes pump energy), we push the
+# thermostat target above the actual user setpoint. The orchestrator's own
+# hysteresis (comparing Tcur to input_number.user_sp_*) remains the real
+# control loop; the thermostat is effectively kept "wide open" until the
+# orchestrator decides the room is satisfied.
+THERMOSTAT_OVERSHOOT_OFFSET = 2.0  # °C
+# Upper bound for the inflated thermostat target (matches helper range 5..30).
+THERMOSTAT_MAX_SETPOINT = 30.0  # °C
+
 
 class HeatOrchestrator(hass.Hass):
     """Main heat orchestrator AppDaemon application."""
@@ -427,25 +439,34 @@ class HeatOrchestrator(hass.Hass):
             else:
                 t_user = 21.0
 
+        # Inflate the thermostat target above the user setpoint so the
+        # thermostat's built-in ~0.5°C cut-off never trips before the
+        # orchestrator considers the room satisfied. Clamped to the
+        # thermostat's allowed range.
+        t_target = min(t_user + THERMOSTAT_OVERSHOOT_OFFSET, THERMOSTAT_MAX_SETPOINT)
+
         entity = f"{CLIMATE_PREFIX}{room}"
         current_sp = self._get_climate_setpoint(room)
-        if current_sp is not None and abs(current_sp - t_user) < 0.05:
+        if current_sp is not None and abs(current_sp - t_target) < 0.05:
             self._set_heating_sensor(room, True)
             return  # already correct
 
         self.automation_guard[room] = True
         try:
             self.call_service(
-                "climate/set_temperature", entity_id=entity, temperature=t_user
+                "climate/set_temperature", entity_id=entity, temperature=t_target
             )
-            self.log(f"[ROOM] enable {room} → {t_user}°C")
+            self.log(
+                f"[ROOM] enable {room} → {t_target}°C "
+                f"(user_sp={t_user}°C, +{THERMOSTAT_OVERSHOOT_OFFSET}°C overshoot)"
+            )
             self._set_heating_sensor(room, True)
         except Exception as e:
             self.log(f"[ERROR] enable_room {room}: {e}", level="ERROR")
             # Retry once
             try:
                 self.call_service(
-                    "climate/set_temperature", entity_id=entity, temperature=t_user
+                    "climate/set_temperature", entity_id=entity, temperature=t_target
                 )
                 self._set_heating_sensor(room, True)
             except Exception as e2:

@@ -334,8 +334,11 @@ Akcja OFF:
 - Jeśli `Tuser` nieustawione / `None`:
   - fallback: użyj bieżącego `state_attr(climate.room,"temperature")` jeśli sensowne (np. 15..30),
   - inaczej fallback stały: 21.0.
+- Wylicz `Ttarget = min(Tuser + 2.0, 30.0)`.
+  - Powód: termostaty pokojowe zamykają zawór, gdy aktualna temperatura jest w okolicach ~0.5°C poniżej zadanej. Wpisanie na termostat wartości wyższej o 2°C utrzymuje zawór otwarty aż orkiestrator sam uzna pokój za nasycony (`Tcur ≥ Tuser + hoff`). Zapobiega to marnowaniu energii pompy, kiedy zawór już się zamknął, a orkiestrator nadal uważa pokój za grzany.
+  - Hysteresis i decyzje demand orkiestratora dalej operują na `Tuser` (z `input_number.user_sp_*`), a nie na nastawie termostatu.
 - Ustaw `automation_guard[room]=True`.
-- `climate.set_temperature(entity_id=climate.room, temperature=Tuser)`
+- `climate.set_temperature(entity_id=climate.room, temperature=Ttarget)`
 - Po 1–3s: `automation_guard[room]=False`.
 
 ### 10.2 `disable_room(room)`

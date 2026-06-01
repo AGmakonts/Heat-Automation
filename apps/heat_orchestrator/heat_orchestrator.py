@@ -194,6 +194,14 @@ class HeatOrchestrator(hass.Hass):
     def hyst_on(self) -> float:
         return self._param("input_number.heating_hyst_on", 0.3)
 
+    # Offset added to user setpoint when commanding the thermostat.
+    # Thermostat valves close when current temp is within ~0.5°C of their
+    # target. To prevent valves closing prematurely (while the orchestrator
+    # still considers the room as heating), we command the thermostat to
+    # user_sp + THERMOSTAT_OVERSHOOT. The orchestrator alone decides when
+    # the room is satisfied (based on the unmodified user_sp).
+    THERMOSTAT_OVERSHOOT: float = 2.0
+
     @property
     def hyst_off(self) -> float:
         return self._param("input_number.heating_hyst_off", 0.2)
@@ -427,25 +435,30 @@ class HeatOrchestrator(hass.Hass):
             else:
                 t_user = 21.0
 
+        # Command thermostat to user_sp + overshoot so the valve stays open
+        # past the thermostat's internal ~0.5°C deadband. The orchestrator
+        # disables the room when current temp reaches the real user_sp.
+        target_sp = min(30.0, t_user + self.THERMOSTAT_OVERSHOOT)
+
         entity = f"{CLIMATE_PREFIX}{room}"
         current_sp = self._get_climate_setpoint(room)
-        if current_sp is not None and abs(current_sp - t_user) < 0.05:
+        if current_sp is not None and abs(current_sp - target_sp) < 0.05:
             self._set_heating_sensor(room, True)
             return  # already correct
 
         self.automation_guard[room] = True
         try:
             self.call_service(
-                "climate/set_temperature", entity_id=entity, temperature=t_user
+                "climate/set_temperature", entity_id=entity, temperature=target_sp
             )
-            self.log(f"[ROOM] enable {room} → {t_user}°C")
+            self.log(f"[ROOM] enable {room} → {target_sp}°C (user_sp={t_user}°C)")
             self._set_heating_sensor(room, True)
         except Exception as e:
             self.log(f"[ERROR] enable_room {room}: {e}", level="ERROR")
             # Retry once
             try:
                 self.call_service(
-                    "climate/set_temperature", entity_id=entity, temperature=t_user
+                    "climate/set_temperature", entity_id=entity, temperature=target_sp
                 )
                 self._set_heating_sensor(room, True)
             except Exception as e2:
@@ -527,14 +540,29 @@ class HeatOrchestrator(hass.Hass):
         if not (5.0 <= new_val <= 30.0):
             return
 
+        # If the room is currently being heated by the orchestrator, the
+        # thermostat is being held at user_sp + overshoot. A manual change
+        # from the user expresses their desired *room target*, so we recover
+        # the underlying user_sp by subtracting the overshoot. When the room
+        # is not being heated (thermostat parked at room_off_setpoint), the
+        # user's value is taken as-is.
+        overshoot = self.THERMOSTAT_OVERSHOOT
+        if self._is_room_heating(room) and new_val >= (self.room_off_setpoint + overshoot):
+            stored_val = max(5.0, new_val - overshoot)
+        else:
+            stored_val = new_val
+
         sp_entity = f"{USER_SP_PREFIX}{room}"
         current_user_sp = self._get_number(sp_entity)
 
-        if current_user_sp is not None and abs(current_user_sp - new_val) < 0.05:
+        if current_user_sp is not None and abs(current_user_sp - stored_val) < 0.05:
             return  # No change
 
-        self._set_number(sp_entity, new_val)
-        self.log(f"[USER] {room} setpoint changed to {new_val}°C")
+        self._set_number(sp_entity, stored_val)
+        self.log(
+            f"[USER] {room} setpoint changed → user_sp={stored_val}°C "
+            f"(thermostat shown: {new_val}°C)"
+        )
 
     def _on_weather_change(self, entity, attribute, old, new, **kwargs):
         pass  # Tick handles weather; this is placeholder for potential future use

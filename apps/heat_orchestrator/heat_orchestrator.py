@@ -532,6 +532,15 @@ class HeatOrchestrator(hass.Hass):
         if new is None:
             return
 
+        # Ignore the unavailable→available recovery edge. When a TRV drops
+        # offline its `temperature` attribute disappears (callback fires with
+        # new=None, handled above). When it reconnects, AppDaemon delivers
+        # old=None with the cached/parked setpoint as `new`. That is not a
+        # user action and must not be recorded as one — otherwise a room
+        # parked at room_off_setpoint (7.0°C) silently overwrites user_sp.
+        if old in (None, "unknown", "unavailable", ""):
+            return
+
         try:
             new_val = float(new)
         except (ValueError, TypeError):

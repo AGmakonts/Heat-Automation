@@ -59,8 +59,7 @@ class HeatOrchestrator(hass.Hass):
         # Last known outdoor temperature (fallback)
         self._last_outdoor_temp: float | None = None
 
-        # Track last decision tick log to avoid spam
-        self._last_logged_state: str | None = None
+        # Track decision tick logging cadence to avoid log spam
         self._log_every_n_ticks: int = 5
         self._tick_counter: int = 0
 
@@ -80,8 +79,8 @@ class HeatOrchestrator(hass.Hass):
                 room=room,
             )
 
-        # --- Listener: weather changes ---
-        self.listen_state(self._on_weather_change, WEATHER_ENTITY)
+        # Weather is read on demand each tick (see _get_outdoor_temp); no
+        # dedicated listener is needed.
 
         # --- Main tick every 60 seconds ---
         self.run_every(self._tick, "now", 60)
@@ -235,18 +234,10 @@ class HeatOrchestrator(hass.Hass):
     def dhw_min_run_hours(self) -> float:
         return self._param("input_number.dhw_min_run_hours", 3.5)
 
-    @property
-    def bulk_mode_temp(self) -> float:
-        return self._param("input_number.bulk_mode_temp", 5.0)
-
-    @property
-    def sequential_mode_temp(self) -> float:
-        return self._param("input_number.sequential_mode_temp", -5.0)
-
-    @property
-    def max_rooms_limited(self) -> int:
-        val = self._param("input_number.max_rooms_limited", 2.0)
-        return max(1, int(val))
+    # NOTE: bulk_mode_temp / sequential_mode_temp / max_rooms_limited were
+    # superseded by the LERP-based room selection (see _lerp_max_rooms) and are
+    # no longer read by the code. Their HA helpers are retained for backward
+    # compatibility but the unused properties have been removed.
 
     @property
     def max_continuous_heating_min(self) -> float:
@@ -585,9 +576,6 @@ class HeatOrchestrator(hass.Hass):
             f"[USER] {room} setpoint changed → user_sp={stored_val}°C "
             f"(thermostat shown: {new_val}°C)"
         )
-
-    def _on_weather_change(self, entity, attribute, old, new, **kwargs):
-        pass  # Tick handles weather; this is placeholder for potential future use
 
     # -----------------------------------------------------------------------
     # Pump control

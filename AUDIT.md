@@ -89,11 +89,14 @@ match the `salon_2` room_id and need no override.
    silently weakening pump-cooldown and min-state-duration checks. Pin/note the
    Python version or use `strptime`.
 
-4. **Dead/legacy config.** `bulk_mode_temp`, `sequential_mode_temp`,
-   `max_rooms_limited` properties (`heat_orchestrator.py:226-236`) are unused
-   since the LERP rewrite. They remain in helpers, the README parameter table,
-   and the README "How It Works" / spec §13.5 text, which still describe
-   bulk/limited/sequential mode that no longer exists. Remove or mark deprecated.
+4. **Dead/legacy config — RESOLVED (code).** The unused `bulk_mode_temp`,
+   `sequential_mode_temp` and `max_rooms_limited` properties (superseded by
+   `_lerp_max_rooms`) were removed, along with the never-read `_last_logged_state`
+   instance variable and the no-op `_on_weather_change` listener/handler. The
+   corresponding HA helpers are retained for backward compatibility (per the
+   "don't rename HA entities" constraint). Docs (README parameter table, spec
+   §13.5) still describe the old bulk/limited/sequential mode and remain to be
+   updated.
 
 5. **`_need_heat_floor` uses `_has_demand`, not `_need_heat`.** A deliberate,
    reasonable hysteresis improvement that deviates from spec §5 without the spec

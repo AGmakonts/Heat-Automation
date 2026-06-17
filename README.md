@@ -10,7 +10,7 @@ This system controls a heat pump powering underfloor heating across two manifold
 
 - **Floor exclusivity** — only one floor (GF or FF) heats at a time to respect hydraulic constraints
 - **Smart room selection** — prioritizes rooms by temperature deficit × user-defined priority
-- **Outdoor temperature modes** — adapts the number of simultaneously heated rooms based on outside temperature (bulk / limited / sequential)
+- **Outdoor-temperature room scaling** — linearly interpolates (LERP) the number of simultaneously heated rooms between a minimum and maximum based on the outdoor temperature
 - **User setpoint memory** — remembers manual thermostat adjustments even when rooms are temporarily disabled
 - **DHW quota** — ensures the pump runs a configurable minimum daily hours for hot water
 - **Nightly off-window** — enforces a pump-off period (default 01:00–06:00)
@@ -128,15 +128,16 @@ INFO heat_orchestrator: === HeatOrchestrator ready ===
 | Min pump ON time | 40 min | `input_number.min_pump_on_min` |
 | Min pump OFF time | 25 min | `input_number.min_pump_off_min` |
 | DHW min daily hours | 3.5 h | `input_number.dhw_min_run_hours` |
-| Bulk mode threshold | +5°C | `input_number.bulk_mode_temp` |
-| Sequential mode threshold | -5°C | `input_number.sequential_mode_temp` |
-| Max rooms (limited mode) | 2 | `input_number.max_rooms_limited` |
 | Max continuous heating time | 120 min | `input_number.max_continuous_heating_min` |
-| LERP temp min (1 room) | -10°C | `input_number.lerp_temp_min` |
-| LERP temp max (max rooms) | +10°C | `input_number.lerp_temp_max` |
+| LERP temp min (→ min rooms) | -10°C | `input_number.lerp_temp_min` |
+| LERP temp max (→ max rooms) | +10°C | `input_number.lerp_temp_max` |
 | LERP min rooms | 1 | `input_number.lerp_rooms_min` |
 | LERP max rooms | 5 | `input_number.lerp_rooms_max` |
 | OFF window | 01:00–06:00 | `input_datetime.off_window_start/end` |
+
+> The `bulk_mode_temp`, `sequential_mode_temp` and `max_rooms_limited` helpers
+> are retained for backward compatibility but are no longer used — room count
+> is now determined by the LERP parameters above.
 
 ## How It Works
 
@@ -146,7 +147,7 @@ Every 60 seconds the orchestrator runs a tick cycle:
 2. **Compute demand** — for each room, check if current temperature is below user setpoint minus hysteresis
 3. **Score floors** — `floor_score = max(deficit × priority)` across all rooms with demand
 4. **Select floor** — pick the highest-scoring floor (won't switch before `min_state_duration` elapses)
-5. **Select rooms** — based on outdoor temperature: all demanding rooms (bulk), top N (limited), or top 1 (sequential)
+5. **Select rooms** — heat the top-scoring rooms on the active floor, where the room count is interpolated (LERP) from the outdoor temperature between `lerp_rooms_min` (at `lerp_temp_min`) and `lerp_rooms_max` (at `lerp_temp_max`), capped by the rooms with demand
 6. **Control thermostats** — enable selected rooms (restore user setpoint), disable others (set to 7°C)
 7. **Control pump** — turn on/off respecting min on/off timers and cooldown periods
 8. **DHW quota** — if no heating demand but daily quota unmet, keep pump running with all rooms disabled

@@ -94,9 +94,10 @@ match the `salon_2` room_id and need no override.
    `_lerp_max_rooms`) were removed, along with the never-read `_last_logged_state`
    instance variable and the no-op `_on_weather_change` listener/handler. The
    corresponding HA helpers are retained for backward compatibility (per the
-   "don't rename HA entities" constraint). Docs (README parameter table, spec
-   §13.5) still describe the old bulk/limited/sequential mode and remain to be
-   updated.
+   "don't rename HA entities" constraint). Docs updated to match: README key
+   features / parameter table / "How It Works", and spec acceptance test §13.5
+   now describe the LERP-based room scaling. (SETUP_GUIDE already flagged the
+   legacy helpers as retained-for-compat.)
 
 5. **`_need_heat_floor` uses `_has_demand`, not `_need_heat`.** A deliberate,
    reasonable hysteresis improvement that deviates from spec §5 without the spec

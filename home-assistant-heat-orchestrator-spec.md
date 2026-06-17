@@ -428,9 +428,10 @@ Każdy tick, jeśli decyzja się zmienia lub co X minut:
 4. **Quota CWU**
    - Gdy pokoje dogrzane, a `pump_on_minutes_today < dhw_min_run_hours*60` → pompa przechodzi w `DHW_QUOTA` i dobija quota (poza off window).
 
-5. **Tryb zależny od temperatury zewnętrznej**
-   - Przy `T_out <= sequential_mode_temp` aktywne jest maks. 1 pomieszczenie na piętrze.
-   - Przy `T_out >= bulk_mode_temp` aktywne są wszystkie pomieszczenia z demand na piętrze.
+5. **Liczba pokoi zależna od temperatury zewnętrznej (LERP)**
+   - Przy `T_out <= lerp_temp_min` aktywne jest maks. `lerp_rooms_min` pomieszczeń na piętrze.
+   - Przy `T_out >= lerp_temp_max` aktywne jest maks. `lerp_rooms_max` pomieszczeń (ograniczone liczbą pokoi z demand na piętrze).
+   - Pomiędzy progami liczba pokoi jest interpolowana liniowo (zaokrąglana w dół).
 
 6. **Anty-oscylacje**
    - Piętro nie przełącza się częściej niż `min_state_duration_min`.

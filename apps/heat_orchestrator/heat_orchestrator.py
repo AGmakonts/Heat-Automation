@@ -101,7 +101,7 @@ class HeatOrchestrator(hass.Hass):
     def _bootstrap_user_setpoints(self):
         """On first run, seed user_sp helpers from current thermostat setpoints."""
         for room in ALL_ROOMS:
-            sp_entity = f"{USER_SP_PREFIX}{room}"
+            sp_entity = self._user_sp_entity(room)
             current_val = self._get_number(sp_entity)
             if current_val is None or current_val < 5.0:
                 climate_sp = self._get_climate_setpoint(room)
@@ -129,6 +129,19 @@ class HeatOrchestrator(hass.Hass):
         self.call_service(
             "input_number/set_value", entity_id=entity, value=round(value, 1)
         )
+
+    # Some rooms' user_sp helper IDs don't follow the room_id convention.
+    # The `salon` room's HA entities were renamed to `salon_2` after the
+    # initial implementation, but the user setpoint helper was left as
+    # `user_sp_salon`. We must not rename HA entities, so map it here.
+    _USER_SP_OVERRIDES: dict[str, str] = {
+        "salon_2": "input_number.user_sp_salon",
+    }
+
+    def _user_sp_entity(self, room: str) -> str:
+        """Return the user-setpoint helper entity id for a room, honoring
+        any per-room override for non-conventional helper names."""
+        return self._USER_SP_OVERRIDES.get(room, f"{USER_SP_PREFIX}{room}")
 
     def _get_climate_setpoint(self, room: str) -> float | None:
         entity = f"{CLIMATE_PREFIX}{room}"
@@ -343,7 +356,7 @@ class HeatOrchestrator(hass.Hass):
                 del self.unmanaged_rooms[room]
 
         t_cur = self._get_climate_current_temp(room)
-        t_user = self._get_number(f"{USER_SP_PREFIX}{room}")
+        t_user = self._get_number(self._user_sp_entity(room))
         if t_cur is None or t_user is None:
             return False
         return t_cur < (t_user - self.hyst_on)
@@ -351,7 +364,7 @@ class HeatOrchestrator(hass.Hass):
     def _satisfied(self, room: str) -> bool:
         """Room is satisfied: Tcur >= Tuser + hyst_off."""
         t_cur = self._get_climate_current_temp(room)
-        t_user = self._get_number(f"{USER_SP_PREFIX}{room}")
+        t_user = self._get_number(self._user_sp_entity(room))
         if t_cur is None or t_user is None:
             return True
         return t_cur >= (t_user + self.hyst_off)
@@ -386,7 +399,7 @@ class HeatOrchestrator(hass.Hass):
     # -----------------------------------------------------------------------
     def _room_score(self, room: str) -> float:
         t_cur = self._get_climate_current_temp(room)
-        t_user = self._get_number(f"{USER_SP_PREFIX}{room}")
+        t_user = self._get_number(self._user_sp_entity(room))
         priority = self._param(f"{PRIORITY_PREFIX}{room}", 50.0)
         if t_cur is None or t_user is None:
             return 0.0
@@ -427,7 +440,7 @@ class HeatOrchestrator(hass.Hass):
         self._set_heating_minutes(room, 0)
 
     def _enable_room(self, room: str):
-        t_user = self._get_number(f"{USER_SP_PREFIX}{room}")
+        t_user = self._get_number(self._user_sp_entity(room))
         if t_user is None or t_user < 5.0 or t_user > 30.0:
             climate_sp = self._get_climate_setpoint(room)
             if climate_sp is not None and 15.0 <= climate_sp <= 30.0:
@@ -495,10 +508,10 @@ class HeatOrchestrator(hass.Hass):
 
         self.run_in(self._release_guard, GUARD_RELEASE_DELAY, room=room)
 
-    # Mapping for rooms whose input_boolean entity ID differs from room_id
-    _HEATING_ENTITY_OVERRIDES: dict[str, str] = {
-        "salon": "input_boolean.heating_salon_2",
-    }
+    # Mapping for rooms whose input_boolean entity ID differs from the
+    # `heating_<room_id>` convention. Currently none: `salon_2`'s boolean is
+    # `input_boolean.heating_salon_2`, which the default derivation produces.
+    _HEATING_ENTITY_OVERRIDES: dict[str, str] = {}
 
     def _set_heating_sensor(self, room: str, heating: bool):
         """Update the per-room heating status input_boolean."""
@@ -561,7 +574,7 @@ class HeatOrchestrator(hass.Hass):
         else:
             stored_val = new_val
 
-        sp_entity = f"{USER_SP_PREFIX}{room}"
+        sp_entity = self._user_sp_entity(room)
         current_user_sp = self._get_number(sp_entity)
 
         if current_user_sp is not None and abs(current_user_sp - stored_val) < 0.05:
@@ -701,7 +714,7 @@ class HeatOrchestrator(hass.Hass):
         def sort_key(r):
             prio = self._param(f"{PRIORITY_PREFIX}{r}", 50.0)
             t_cur = self._get_climate_current_temp(r) or 0.0
-            t_user = self._get_number(f"{USER_SP_PREFIX}{r}") or 21.0
+            t_user = self._get_number(self._user_sp_entity(r)) or 21.0
             deficit = max(0.0, t_user - t_cur)
             return (-prio, -deficit)
 

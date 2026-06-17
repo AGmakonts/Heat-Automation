@@ -13,7 +13,16 @@ implementation spec, and setup/update guides. The Python compiles cleanly
 
 ---
 
-## 🔴 Critical — the `salon` / `salon_2` identity split
+## 🔴 Critical — the `salon` / `salon_2` identity split — RESOLVED
+
+> **Resolution (2026-06-17):** The HA entities were intentionally renamed to
+> `salon_2` after the initial implementation, and HA entities (including
+> helpers) must not be renamed. The `user_sp_salon` helper is the sole entity
+> that kept the old name. Fixed in code by routing the `salon_2` room's user
+> setpoint through an explicit override (`_USER_SP_OVERRIDES` /
+> `_user_sp_entity()`) to `input_number.user_sp_salon`, and by removing the
+> stale (never-matching) `_HEATING_ENTITY_OVERRIDES` entry. No HA entities were
+> renamed. Original finding retained below for context.
 
 The room is registered in code as `salon_2` (`heat_orchestrator.py:19`), but all
 entity names are derived from the `room_id`. The supporting entities are split
@@ -42,13 +51,13 @@ across two spellings:
   falls through to the default, which coincidentally resolves to the correct
   boolean — masking the inconsistency.
 
-### Recommendation
+### Recommendation (applied)
 
-Standardize on a single `room_id`. The docs and most of the code point to
-`salon`, so the lowest-risk fix is: change `GF_ROOMS` to use `salon`, rename the
-three `*_salon_2` helpers to `*_salon`, delete the override, and confirm the
-real climate entity id. This depends on the actual entity ids in the live HA
-instance and should be confirmed before applying.
+Because the live HA entities are canonically `salon_2` and must not be renamed,
+the deviation is handled in code: `salon_2` maps to the existing
+`input_number.user_sp_salon` via `_USER_SP_OVERRIDES`. The `climate.salon_2`,
+`priority_salon_2`, `heating_salon_2` and `heating_minutes_salon_2` entities all
+match the `salon_2` room_id and need no override.
 
 ---
 

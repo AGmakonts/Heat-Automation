@@ -116,7 +116,7 @@ flowchart TD
     end
 
     subgraph Inputs["Inputs"]
-        TEMPS[Room temperatures\n7 climate entities]
+        TEMPS[Room temperatures\n8 climate entities]
         WEATHER[Outdoor temperature\nweather.forecast_home]
         SETPOINTS[User setpoints\nstored in helpers]
         PRIORITIES[Room priorities\n1 – 100]
@@ -124,8 +124,8 @@ flowchart TD
     end
 
     subgraph Actuators["Actuators"]
-        PUMP_ON_ACT[Pump ON\nswitch.sonoff]
-        PUMP_OFF_ACT[Pump OFF\ninput_button]
+        PUMP_ON_ACT[Pump ON\nscript.uruchom_pompe]
+        PUMP_OFF_ACT[Pump OFF\nscript.wylacz_pompe]
         THERMO[Thermostats\nset_temperature]
     end
 

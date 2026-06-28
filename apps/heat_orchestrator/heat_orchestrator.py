@@ -14,20 +14,73 @@ import hassapi as hass
 import datetime
 
 # ---------------------------------------------------------------------------
-# Constants
+# Room configuration (single source of truth)
 # ---------------------------------------------------------------------------
-GF_ROOMS = ["gabinet_ani", "lazienka_parter", "salon_2"]
-FF_ROOMS = ["sypialnia", "lazienka_pietro", "pokoj_z_oknem_naroznym", "pokoj_z_tarasem"]
-ALL_ROOMS = GF_ROOMS + FF_ROOMS
+class Room:
+    """Static config for a managed room.
 
-CLIMATE_PREFIX = "climate."
-USER_SP_PREFIX = "input_number.user_sp_"
-PRIORITY_PREFIX = "input_number.priority_"
-HEATING_PREFIX = "input_boolean.heating_"
-HEATING_MINUTES_PREFIX = "input_number.heating_minutes_"
+    `climate` is the HA climate entity (LocalTuya, rename-prone -> explicit).
+    Helper entity IDs are owned by this app and derived from `key`, so they
+    can never drift out of sync with the climate entity.
+    """
 
-PUMP_SWITCH = "switch.sonoff_10017fadeb"
-PUMP_OFF_BUTTON = "input_button.wylacznik_pompy"
+    __slots__ = ("key", "floor", "climate")
+
+    def __init__(self, key: str, floor: str, climate: str):
+        self.key = key
+        self.floor = floor
+        self.climate = climate
+
+    @property
+    def user_sp(self) -> str:
+        return f"input_number.user_sp_{self.key}"
+
+    @property
+    def priority(self) -> str:
+        return f"input_number.priority_{self.key}"
+
+    @property
+    def heating(self) -> str:
+        return f"input_boolean.heating_{self.key}"
+
+    @property
+    def heating_minutes(self) -> str:
+        return f"input_number.heating_minutes_{self.key}"
+
+
+ROOMS: dict[str, Room] = {
+    r.key: r
+    for r in [
+        Room("gabinet_ani", "GF", "climate.gabinet_ani"),
+        Room("lazienka_parter", "GF", "climate.lazienka_parter"),
+        Room("salon", "GF", "climate.salon"),
+        Room("garaz", "GF", "climate.garaz"),
+        Room("sypialnia", "FF", "climate.sypialnia"),
+        Room("lazienka_pietro", "FF", "climate.lazienka_pietro"),
+        Room("pokoj_narozny", "FF", "climate.pokoj_narozny"),
+        Room("pokoj_z_garazem", "FF", "climate.pokoj_z_garazem"),
+    ]
+}
+
+GF_ROOMS = [k for k, r in ROOMS.items() if r.floor == "GF"]
+FF_ROOMS = [k for k, r in ROOMS.items() if r.floor == "FF"]
+ALL_ROOMS = list(ROOMS)
+
+# ---------------------------------------------------------------------------
+# Pump control
+# ---------------------------------------------------------------------------
+# On/off are HA scripts. Script entities have no persistent pump run-state, so
+# actual run-state is read from the power meter: the pump draws >200 W when
+# running and far less when idle, so PUMP_RUNNING_WATTS (150) sits safely
+# between the two as the discrimination threshold (tunable). The mains switch
+# is read-only safety context.
+PUMP_START_SCRIPT = "script.uruchom_pompe"
+PUMP_STOP_SCRIPT = "script.wylacz_pompe"
+PUMP_POWER_SENSOR = "sensor.zasilanie_pompy_sonoff_10017fadeb_power"
+PUMP_MAINS_SWITCH = "switch.zasilanie_pompy_sonoff_10017fadeb_1"
+PUMP_RUNNING_WATTS = 150.0
+PUMP_SPINUP_GRACE_SEC = 120  # power lags the start/stop command; debounce window
+
 WEATHER_ENTITY = "weather.forecast_home"
 
 # FSM States
@@ -59,6 +112,24 @@ class HeatOrchestrator(hass.Hass):
         # Last known outdoor temperature (fallback)
         self._last_outdoor_temp: float | None = None
 
+        # Pump command intent (debounces the power sensor start/stop lag).
+        # Rehydrate from the persisted last_pump_on/off timestamps so a restart
+        # mid-ramp doesn't re-fire the start script or double-count a start.
+        self._pump_intent: str | None = None
+        self._pump_intent_ts: datetime.datetime | None = None
+        _on_min = self._minutes_since("input_datetime.last_pump_on")
+        _off_min = self._minutes_since("input_datetime.last_pump_off")
+        if (
+            _on_min is not None
+            and (_off_min is None or _on_min <= _off_min)
+            and _on_min * 60.0 < PUMP_SPINUP_GRACE_SEC
+        ):
+            self._pump_intent = "on"
+            self._pump_intent_ts = self.datetime() - datetime.timedelta(minutes=_on_min)
+        elif _off_min is not None and _off_min * 60.0 < PUMP_SPINUP_GRACE_SEC:
+            self._pump_intent = "off"
+            self._pump_intent_ts = self.datetime() - datetime.timedelta(minutes=_off_min)
+
         # Track last decision tick log to avoid spam
         self._last_logged_state: str | None = None
         self._log_every_n_ticks: int = 5
@@ -72,7 +143,7 @@ class HeatOrchestrator(hass.Hass):
 
         # --- Listeners: thermostat setpoint changes (user tracking) ---
         for room in ALL_ROOMS:
-            entity = f"{CLIMATE_PREFIX}{room}"
+            entity = ROOMS[room].climate
             self.listen_state(
                 self._on_thermostat_change,
                 entity,
@@ -101,7 +172,7 @@ class HeatOrchestrator(hass.Hass):
     def _bootstrap_user_setpoints(self):
         """On first run, seed user_sp helpers from current thermostat setpoints."""
         for room in ALL_ROOMS:
-            sp_entity = f"{USER_SP_PREFIX}{room}"
+            sp_entity = ROOMS[room].user_sp
             current_val = self._get_number(sp_entity)
             if current_val is None or current_val < 5.0:
                 climate_sp = self._get_climate_setpoint(room)
@@ -131,7 +202,7 @@ class HeatOrchestrator(hass.Hass):
         )
 
     def _get_climate_setpoint(self, room: str) -> float | None:
-        entity = f"{CLIMATE_PREFIX}{room}"
+        entity = ROOMS[room].climate
         val = self.get_state(entity, attribute="temperature")
         if val is None:
             return None
@@ -141,7 +212,7 @@ class HeatOrchestrator(hass.Hass):
             return None
 
     def _get_climate_current_temp(self, room: str) -> float | None:
-        entity = f"{CLIMATE_PREFIX}{room}"
+        entity = ROOMS[room].climate
         val = self.get_state(entity, attribute="current_temperature")
         if val is None:
             return None
@@ -151,7 +222,9 @@ class HeatOrchestrator(hass.Hass):
             return None
 
     def _pump_is_on(self) -> bool:
-        return self.get_state(PUMP_SWITCH) == "on"
+        """Pump is running when its power draw exceeds the running threshold."""
+        power = self._get_number(PUMP_POWER_SENSOR)
+        return power is not None and power > PUMP_RUNNING_WATTS
 
     def _get_fsm_state(self) -> str:
         val = self.get_state("input_text.heat_state")
@@ -343,7 +416,7 @@ class HeatOrchestrator(hass.Hass):
                 del self.unmanaged_rooms[room]
 
         t_cur = self._get_climate_current_temp(room)
-        t_user = self._get_number(f"{USER_SP_PREFIX}{room}")
+        t_user = self._get_number(ROOMS[room].user_sp)
         if t_cur is None or t_user is None:
             return False
         return t_cur < (t_user - self.hyst_on)
@@ -351,7 +424,7 @@ class HeatOrchestrator(hass.Hass):
     def _satisfied(self, room: str) -> bool:
         """Room is satisfied: Tcur >= Tuser + hyst_off."""
         t_cur = self._get_climate_current_temp(room)
-        t_user = self._get_number(f"{USER_SP_PREFIX}{room}")
+        t_user = self._get_number(ROOMS[room].user_sp)
         if t_cur is None or t_user is None:
             return True
         return t_cur >= (t_user + self.hyst_off)
@@ -386,8 +459,8 @@ class HeatOrchestrator(hass.Hass):
     # -----------------------------------------------------------------------
     def _room_score(self, room: str) -> float:
         t_cur = self._get_climate_current_temp(room)
-        t_user = self._get_number(f"{USER_SP_PREFIX}{room}")
-        priority = self._param(f"{PRIORITY_PREFIX}{room}", 50.0)
+        t_user = self._get_number(ROOMS[room].user_sp)
+        priority = self._param(ROOMS[room].priority, 50.0)
         if t_cur is None or t_user is None:
             return 0.0
         deficit = max(0.0, t_user - t_cur)
@@ -403,7 +476,7 @@ class HeatOrchestrator(hass.Hass):
     # -----------------------------------------------------------------------
     def _is_room_heating(self, room: str) -> bool:
         """Check if a room is currently being heated (heating sensor is on)."""
-        entity = self._HEATING_ENTITY_OVERRIDES.get(room, f"{HEATING_PREFIX}{room}")
+        entity = ROOMS[room].heating
         try:
             state = self.get_state(entity)
             return state == "on"
@@ -412,7 +485,7 @@ class HeatOrchestrator(hass.Hass):
 
     def _get_heating_minutes(self, room: str) -> float:
         """Read accumulated heating minutes for a room from its HA helper."""
-        val = self._get_number(f"{HEATING_MINUTES_PREFIX}{room}")
+        val = self._get_number(ROOMS[room].heating_minutes)
         if val is None:
             self.log(f"[WARN] heating_minutes helper missing for {room}", level="WARNING")
             return 0.0
@@ -420,14 +493,14 @@ class HeatOrchestrator(hass.Hass):
 
     def _set_heating_minutes(self, room: str, value: float):
         """Set accumulated heating minutes for a room in its HA helper."""
-        self._set_number(f"{HEATING_MINUTES_PREFIX}{room}", max(0.0, value))
+        self._set_number(ROOMS[room].heating_minutes, max(0.0, value))
 
     def _reset_heating_minutes(self, room: str):
         """Reset accumulated heating minutes for a room to zero."""
         self._set_heating_minutes(room, 0)
 
     def _enable_room(self, room: str):
-        t_user = self._get_number(f"{USER_SP_PREFIX}{room}")
+        t_user = self._get_number(ROOMS[room].user_sp)
         if t_user is None or t_user < 5.0 or t_user > 30.0:
             climate_sp = self._get_climate_setpoint(room)
             if climate_sp is not None and 15.0 <= climate_sp <= 30.0:
@@ -440,7 +513,7 @@ class HeatOrchestrator(hass.Hass):
         # disables the room when current temp reaches the real user_sp.
         target_sp = min(30.0, t_user + self.THERMOSTAT_OVERSHOOT)
 
-        entity = f"{CLIMATE_PREFIX}{room}"
+        entity = ROOMS[room].climate
         current_sp = self._get_climate_setpoint(room)
         if current_sp is not None and abs(current_sp - target_sp) < 0.05:
             self._set_heating_sensor(room, True)
@@ -468,7 +541,7 @@ class HeatOrchestrator(hass.Hass):
         self.run_in(self._release_guard, GUARD_RELEASE_DELAY, room=room)
 
     def _disable_room(self, room: str):
-        entity = f"{CLIMATE_PREFIX}{room}"
+        entity = ROOMS[room].climate
         off_sp = self.room_off_setpoint
         current_sp = self._get_climate_setpoint(room)
         if current_sp is not None and abs(current_sp - off_sp) < 0.05:
@@ -495,14 +568,9 @@ class HeatOrchestrator(hass.Hass):
 
         self.run_in(self._release_guard, GUARD_RELEASE_DELAY, room=room)
 
-    # Mapping for rooms whose input_boolean entity ID differs from room_id
-    _HEATING_ENTITY_OVERRIDES: dict[str, str] = {
-        "salon": "input_boolean.heating_salon_2",
-    }
-
     def _set_heating_sensor(self, room: str, heating: bool):
         """Update the per-room heating status input_boolean."""
-        entity = self._HEATING_ENTITY_OVERRIDES.get(room, f"{HEATING_PREFIX}{room}")
+        entity = ROOMS[room].heating
         try:
             current = self.get_state(entity)
             target = "on" if heating else "off"
@@ -561,7 +629,7 @@ class HeatOrchestrator(hass.Hass):
         else:
             stored_val = new_val
 
-        sp_entity = f"{USER_SP_PREFIX}{room}"
+        sp_entity = ROOMS[room].user_sp
         current_user_sp = self._get_number(sp_entity)
 
         if current_user_sp is not None and abs(current_user_sp - stored_val) < 0.05:
@@ -580,10 +648,25 @@ class HeatOrchestrator(hass.Hass):
     # Pump control
     # -----------------------------------------------------------------------
     def _pump_on(self):
+        now = self.datetime()
         if self._pump_is_on():
             return
-        self.call_service("switch/turn_on", entity_id=PUMP_SWITCH)
-        now_str = self.datetime().strftime("%Y-%m-%d %H:%M:%S")
+        # Power lags the start command; suppress duplicate starts during ramp-up.
+        if (
+            self._pump_intent == "on"
+            and self._pump_intent_ts is not None
+            and (now - self._pump_intent_ts).total_seconds() < PUMP_SPINUP_GRACE_SEC
+        ):
+            return
+        if self.get_state(PUMP_MAINS_SWITCH) == "off":
+            self.log(
+                f"[PUMP] mains switch {PUMP_MAINS_SWITCH} is OFF; start may not take effect",
+                level="WARNING",
+            )
+        self.call_service("script/turn_on", entity_id=PUMP_START_SCRIPT)
+        self._pump_intent = "on"
+        self._pump_intent_ts = now
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
         self.call_service(
             "input_datetime/set_datetime",
             entity_id="input_datetime.last_pump_on",
@@ -592,19 +675,29 @@ class HeatOrchestrator(hass.Hass):
         # Increment starts
         starts = self._get_number("input_number.pump_starts_today") or 0
         self._set_number("input_number.pump_starts_today", starts + 1)
-        self.log("[PUMP] ON")
+        self.log("[PUMP] ON (script.uruchom_pompe)")
 
     def _pump_off(self):
+        now = self.datetime()
+        # Power decays after the stop command; suppress duplicate stops.
+        if (
+            self._pump_intent == "off"
+            and self._pump_intent_ts is not None
+            and (now - self._pump_intent_ts).total_seconds() < PUMP_SPINUP_GRACE_SEC
+        ):
+            return
         if not self._pump_is_on():
             return
-        self.call_service("input_button/press", entity_id=PUMP_OFF_BUTTON)
-        now_str = self.datetime().strftime("%Y-%m-%d %H:%M:%S")
+        self.call_service("script/turn_on", entity_id=PUMP_STOP_SCRIPT)
+        self._pump_intent = "off"
+        self._pump_intent_ts = now
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
         self.call_service(
             "input_datetime/set_datetime",
             entity_id="input_datetime.last_pump_off",
             datetime=now_str,
         )
-        self.log("[PUMP] OFF (graceful)")
+        self.log("[PUMP] OFF (graceful, script.wylacz_pompe)")
 
     def _minutes_since(self, dt_entity: str) -> float | None:
         val = self.get_state(dt_entity)
@@ -699,9 +792,9 @@ class HeatOrchestrator(hass.Hass):
 
         # Sort by priority desc, then deficit desc
         def sort_key(r):
-            prio = self._param(f"{PRIORITY_PREFIX}{r}", 50.0)
+            prio = self._param(ROOMS[r].priority, 50.0)
             t_cur = self._get_climate_current_temp(r) or 0.0
-            t_user = self._get_number(f"{USER_SP_PREFIX}{r}") or 21.0
+            t_user = self._get_number(ROOMS[r].user_sp) or 21.0
             deficit = max(0.0, t_user - t_cur)
             return (-prio, -deficit)
 
@@ -789,8 +882,20 @@ class HeatOrchestrator(hass.Hass):
 
         t_out = self._get_outdoor_temp()
 
+        # A graceful stop was just commanded but the power sensor lags (power
+        # decays for up to PUMP_SPINUP_GRACE_SEC after the stop script runs).
+        # Treat that window as OFF for control so we don't re-open valves on a
+        # pump that is shutting down and then flap OFF→HEAT→OFF. This restores
+        # the old switch-based instant-off behaviour and lets the normal
+        # min_pump_off cooldown govern the next start.
+        pump_stopping = (
+            self._pump_intent == "off"
+            and self._pump_intent_ts is not None
+            and (now - self._pump_intent_ts).total_seconds() < PUMP_SPINUP_GRACE_SEC
+        )
+
         # --- 3. If pump is OFF ---
-        if not self._pump_is_on():
+        if not self._pump_is_on() or pump_stopping:
             # Check min_pump_off cooldown
             mins_off = self._minutes_since("input_datetime.last_pump_off")
             cooldown_ok = mins_off is None or mins_off >= self.min_pump_off

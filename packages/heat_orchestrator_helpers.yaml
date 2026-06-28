@@ -57,7 +57,7 @@ input_number:
     unit_of_measurement: "°C"
     icon: mdi:thermometer
 
-  priority_salon_2:
+  priority_salon:
     name: "Priority – Salon"
     min: 1
     max: 100
@@ -96,33 +96,49 @@ input_number:
     step: 1
     icon: mdi:priority-high
 
-  # --- Pokój z oknem narożnym ---
-  user_sp_pokoj_z_oknem_naroznym:
-    name: "User SP – Pokój z oknem narożnym"
+  # --- Garaż ---
+  user_sp_garaz:
+    name: "User SP – Garaż"
     min: 5
     max: 30
     step: 0.5
     unit_of_measurement: "°C"
     icon: mdi:thermometer
 
-  priority_pokoj_z_oknem_naroznym:
-    name: "Priority – Pokój z oknem narożnym"
+  priority_garaz:
+    name: "Priority – Garaż"
     min: 1
     max: 100
     step: 1
     icon: mdi:priority-high
 
-  # --- Pokój z tarasem ---
-  user_sp_pokoj_z_tarasem:
-    name: "User SP – Pokój z tarasem"
+  # --- Pokój narożny ---
+  user_sp_pokoj_narozny:
+    name: "User SP – Pokój narożny"
     min: 5
     max: 30
     step: 0.5
     unit_of_measurement: "°C"
     icon: mdi:thermometer
 
-  priority_pokoj_z_tarasem:
-    name: "Priority – Pokój z tarasem"
+  priority_pokoj_narozny:
+    name: "Priority – Pokój narożny"
+    min: 1
+    max: 100
+    step: 1
+    icon: mdi:priority-high
+
+  # --- Pokój z garażem ---
+  user_sp_pokoj_z_garazem:
+    name: "User SP – Pokój z garażem"
+    min: 5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer
+
+  priority_pokoj_z_garazem:
+    name: "Priority – Pokój z garażem"
     min: 1
     max: 100
     step: 1
@@ -259,6 +275,15 @@ input_number:
     unit_of_measurement: "min"
     icon: mdi:timer-sand
 
+  heating_minutes_garaz:
+    name: "Heating Minutes – Garaż"
+    min: 0
+    max: 1440
+    step: 1
+    initial: 0
+    unit_of_measurement: "min"
+    icon: mdi:timer-sand
+
   heating_minutes_lazienka_parter:
     name: "Heating Minutes – Łazienka Parter"
     min: 0
@@ -268,7 +293,7 @@ input_number:
     unit_of_measurement: "min"
     icon: mdi:timer-sand
 
-  heating_minutes_salon_2:
+  heating_minutes_salon:
     name: "Heating Minutes – Salon"
     min: 0
     max: 1440
@@ -295,8 +320,8 @@ input_number:
     unit_of_measurement: "min"
     icon: mdi:timer-sand
 
-  heating_minutes_pokoj_z_oknem_naroznym:
-    name: "Heating Minutes – Pokój z oknem narożnym"
+  heating_minutes_pokoj_narozny:
+    name: "Heating Minutes – Pokój narożny"
     min: 0
     max: 1440
     step: 1
@@ -304,8 +329,8 @@ input_number:
     unit_of_measurement: "min"
     icon: mdi:timer-sand
 
-  heating_minutes_pokoj_z_tarasem:
-    name: "Heating Minutes – Pokój z tarasem"
+  heating_minutes_pokoj_z_garazem:
+    name: "Heating Minutes – Pokój z garażem"
     min: 0
     max: 1440
     step: 1
@@ -409,11 +434,15 @@ input_boolean:
     name: "Heating – Gabinet Ani"
     icon: mdi:radiator
 
+  heating_garaz:
+    name: "Heating – Garaż"
+    icon: mdi:radiator
+
   heating_lazienka_parter:
     name: "Heating – Łazienka Parter"
     icon: mdi:radiator
 
-  heating_salon_2:
+  heating_salon:
     name: "Heating – Salon"
     icon: mdi:radiator
 
@@ -425,12 +454,12 @@ input_boolean:
     name: "Heating – Łazienka Piętro"
     icon: mdi:radiator
 
-  heating_pokoj_z_oknem_naroznym:
-    name: "Heating – Pokój z oknem narożnym"
+  heating_pokoj_narozny:
+    name: "Heating – Pokój narożny"
     icon: mdi:radiator
 
-  heating_pokoj_z_tarasem:
-    name: "Heating – Pokój z tarasem"
+  heating_pokoj_z_garazem:
+    name: "Heating – Pokój z garażem"
     icon: mdi:radiator
 
 # ---------------------------------------------------------------------------

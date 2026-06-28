@@ -5,25 +5,25 @@
 - Home Assistant instance running (HAOS, Docker, or Core)
 - AppDaemon 4.x add-on / installation
 - The following integrations already configured:
-  - Climate entities for all thermostats (`climate.gabinet_ani`, `climate.lazienka_parter`, `climate.salon`, `climate.sypialnia`, `climate.lazienka_pietro`, `climate.pokoj_z_oknem_naroznym`, `climate.pokoj_z_tarasem`)
-  - Pump switch: `switch.sonoff_10017fadeb`
-  - Pump OFF button: `input_button.wylacznik_pompy` (must exist before starting)
+  - Climate entities for all thermostats (`climate.gabinet_ani`, `climate.lazienka_parter`, `climate.salon`, `climate.garaz`, `climate.sypialnia`, `climate.lazienka_pietro`, `climate.pokoj_narozny`, `climate.pokoj_z_garazem`)
+  - Pump ON script: `script.uruchom_pompe`
+  - Pump OFF script: `script.wylacz_pompe` (graceful shutdown; must exist before starting)
+  - Pump power meter: `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W) — used to detect pump run-state
+  - Pump mains master switch: `switch.zasilanie_pompy_sonoff_10017fadeb_1` (read-only safety context)
   - Weather: `weather.forecast_home` (Met.no integration)
 
 ---
 
-## Step 1: Create the Input Button (if it doesn't exist)
+## Step 1: Create the Pump Scripts (if they don't exist)
 
-If `input_button.wylacznik_pompy` doesn't already exist, create it:
+The orchestrator turns the pump ON via `script.uruchom_pompe` and OFF via `script.wylacz_pompe`. Create them if they don't already exist:
 
-1. Go to **Settings → Devices & services → Helpers**
-2. Click **+ Create Helper**
-3. Choose **Button**
-4. Name: `Wyłącznik Pompy`
-5. Entity ID will be `input_button.wylacznik_pompy`
-6. Click **Create**
+1. Go to **Settings → Automations & scenes → Scripts**
+2. Click **+ Add Script**
+3. Create `script.uruchom_pompe` — the start sequence for the pump
+4. Create `script.wylacz_pompe` — the graceful shutdown sequence for the pump
 
-> **Note:** This button should trigger an automation or script that performs the pump's graceful shutdown sequence.
+> **Note:** `script.wylacz_pompe` should perform the pump's graceful shutdown sequence. The orchestrator detects whether the pump is actually running by reading the power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (pump considered running when power > 200 W; the app uses a 150 W threshold for margin), not by reading the scripts. The mains master switch `switch.zasilanie_pompy_sonoff_10017fadeb_1` is read-only safety context.
 
 ---
 
@@ -62,10 +62,12 @@ If you prefer not to use packages, create each helper manually through the UI:
 
 **Settings → Devices & services → Helpers → + Create Helper**
 
-For each room (`gabinet_ani`, `lazienka_parter`, `salon`, `sypialnia`, `lazienka_pietro`, `pokoj_z_oknem_naroznym`, `pokoj_z_tarasem`):
+For each room (`gabinet_ani`, `lazienka_parter`, `salon`, `garaz`, `sypialnia`, `lazienka_pietro`, `pokoj_narozny`, `pokoj_z_garazem`):
 
 1. **Number** – `user_sp_<room_id>` (range 5–30, step 0.5, unit °C)
 2. **Number** – `priority_<room_id>` (range 1–100, step 1)
+3. **Toggle** – `heating_<room_id>` (heating status)
+4. **Number** – `heating_minutes_<room_id>` (range 0–1440, step 1, unit min)
 
 Then create global helpers:
 
@@ -264,22 +266,25 @@ entities:
     name: Heating Łazienka Parter
   - entity: input_boolean.heating_salon
     name: Heating Salon
+  - entity: input_boolean.heating_garaz
+    name: Heating Garaż
   - entity: input_boolean.heating_sypialnia
     name: Heating Sypialnia
   - entity: input_boolean.heating_lazienka_pietro
     name: Heating Łazienka Piętro
-  - entity: input_boolean.heating_pokoj_z_oknem_naroznym
-    name: Heating Pokój z oknem narożnym
-  - entity: input_boolean.heating_pokoj_z_tarasem
-    name: Heating Pokój z tarasem
+  - entity: input_boolean.heating_pokoj_narozny
+    name: Heating Pokój narożny
+  - entity: input_boolean.heating_pokoj_z_garazem
+    name: Heating Pokój z garażem
   - type: divider
   - entity: input_number.user_sp_salon
+  - entity: input_number.user_sp_garaz
   - entity: input_number.user_sp_sypialnia
   - entity: input_number.user_sp_gabinet_ani
   - entity: input_number.user_sp_lazienka_parter
   - entity: input_number.user_sp_lazienka_pietro
-  - entity: input_number.user_sp_pokoj_z_oknem_naroznym
-  - entity: input_number.user_sp_pokoj_z_tarasem
+  - entity: input_number.user_sp_pokoj_narozny
+  - entity: input_number.user_sp_pokoj_z_garazem
   - type: divider
   - entity: input_number.heating_hyst_on
   - entity: input_number.heating_hyst_off
@@ -302,12 +307,14 @@ entities:
 - Verify all helper entities exist (the app handles missing entities gracefully but logs warnings)
 
 ### Pump doesn't turn on
-- Verify `switch.sonoff_10017fadeb` is available and controllable
+- Verify `script.uruchom_pompe` exists and runs correctly
+- Confirm the power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` reports watts (pump considered running when power > 200 W; the app uses a 150 W threshold for margin)
 - Check if you're inside the OFF window (01:00–06:00)
 - Check `input_number.min_pump_off_min` cooldown hasn't elapsed yet
 
 ### Pump doesn't turn off
-- The pump OFF uses `input_button.wylacznik_pompy` – make sure it triggers your graceful shutdown automation
+- The pump OFF uses `script.wylacz_pompe` – make sure it performs your graceful shutdown sequence
+- Verify the power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` drops below the threshold after shutdown (run-state is read from power, not from the script)
 - Check `input_number.min_pump_on_min` – the pump won't stop until this minimum is met
 
 ### User setpoints are lost
@@ -345,10 +352,12 @@ entities:
     │   Home Assistant    │  │   climate.*         │
     │   Helpers           │  │   (thermostats)     │
     │   (input_number,    │  │                     │
-    │    input_datetime,  │  │   switch.sonoff_*   │
+    │    input_datetime,  │  │   script.uruchom_*  │
     │    input_text)      │  │   (pump ON)         │
     │                     │  │                     │
-    │                     │  │   input_button.*    │
+    │                     │  │   script.wylacz_*   │
     │                     │  │   (pump OFF)        │
+    │                     │  │   sensor.*_power    │
+    │                     │  │   (run-state)       │
     └─────────────────────┘  └────────────────────┘
 ```

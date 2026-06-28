@@ -10,7 +10,7 @@ This system controls a heat pump powering underfloor heating across two manifold
 
 - **Floor exclusivity** — only one floor (GF or FF) heats at a time to respect hydraulic constraints
 - **Smart room selection** — prioritizes rooms by temperature deficit × user-defined priority
-- **Outdoor temperature modes** — adapts the number of simultaneously heated rooms based on outside temperature (bulk / limited / sequential)
+- **Outdoor-temperature room scaling** — linearly interpolates (LERP) the number of simultaneously heated rooms between a configured min and max as the outdoor temperature falls and rises
 - **User setpoint memory** — remembers manual thermostat adjustments even when rooms are temporarily disabled
 - **DHW quota** — ensures the pump runs a configurable minimum daily hours for hot water
 - **Nightly off-window** — enforces a pump-off period (default 01:00–06:00)
@@ -35,7 +35,7 @@ This system controls a heat pump powering underfloor heating across two manifold
 │       ├── heat_orchestrator.py   # AppDaemon app (FSM + control logic)
 │       └── apps.yaml              # AppDaemon app registration
 ├── packages/
-│   └── heat_orchestrator_helpers.yaml  # HA helpers (42 entities)
+│   └── heat_orchestrator_helpers.yaml  # HA helpers (58 entities)
 ├── home-assistant-heat-orchestrator-spec.md  # Full specification
 ├── SETUP_GUIDE.md                 # Detailed step-by-step setup
 └── README.md
@@ -47,16 +47,18 @@ This system controls a heat pump powering underfloor heating across two manifold
 - `climate.gabinet_ani`
 - `climate.lazienka_parter`
 - `climate.salon`
+- `climate.garaz`
 
 **First Floor (FF)**
 - `climate.sypialnia`
 - `climate.lazienka_pietro`
-- `climate.pokoj_z_oknem_naroznym`
-- `climate.pokoj_z_tarasem`
+- `climate.pokoj_narozny`
+- `climate.pokoj_z_garazem`
 
 **Pump**
-- ON: `switch.sonoff_10017fadeb`
-- OFF: `input_button.wylacznik_pompy` (graceful shutdown)
+- ON: `script.uruchom_pompe`
+- OFF: `script.wylacz_pompe` (graceful shutdown)
+- Run-state: detected from power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W) — pump considered running when power > 200 W (the app uses a 150 W threshold for margin). The mains master switch `switch.zasilanie_pompy_sonoff_10017fadeb_1` is read-only safety context.
 
 **Weather**
 - `weather.forecast_home` (Met.no)
@@ -146,7 +148,7 @@ Every 60 seconds the orchestrator runs a tick cycle:
 2. **Compute demand** — for each room, check if current temperature is below user setpoint minus hysteresis
 3. **Score floors** — `floor_score = max(deficit × priority)` across all rooms with demand
 4. **Select floor** — pick the highest-scoring floor (won't switch before `min_state_duration` elapses)
-5. **Select rooms** — based on outdoor temperature: all demanding rooms (bulk), top N (limited), or top 1 (sequential)
+5. **Select rooms** — sort demanding rooms by priority then deficit, then take the top *N*, where *N* is LERP-derived from the current outdoor temperature (clamped to the floor's room count)
 6. **Control thermostats** — enable selected rooms (restore user setpoint), disable others (set to 7°C)
 7. **Control pump** — turn on/off respecting min on/off timers and cooldown periods
 8. **DHW quota** — if no heating demand but daily quota unmet, keep pump running with all rooms disabled

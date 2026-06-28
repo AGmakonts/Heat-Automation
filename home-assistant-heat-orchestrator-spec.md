@@ -23,8 +23,10 @@ Cel: dokument jest „kontraktem” dla agentów AI implementujących sterownik 
 ### 1.3 Ograniczenia pompy i hydrauliki
 - **Nie wolno** jednocześnie grzać parteru i piętra (GF XOR FF).
 - Pompa:
-  - ON: `switch.sonoff_10017fadeb` (**tylko włączanie**).
-  - OFF: `input_button.wylacznik_pompy` (graceful shutdown, wymagane do wyłączania).
+  - ON: `script.uruchom_pompe` (**tylko włączanie**).
+  - OFF: `script.wylacz_pompe` (graceful shutdown, wymagane do wyłączania).
+  - Stan pracy (RUN-STATE) odczytywany z miernika mocy `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W) — pompa uznawana za pracującą, gdy moc > 200 W (aplikacja używa progu 150 W dla marginesu).
+  - Główny wyłącznik zasilania `switch.zasilanie_pompy_sonoff_10017fadeb_1` jest tylko do odczytu (kontekst bezpieczeństwa).
 - CWU/bojler:
   - Brak czujników.
   - Bojler traktowany jako bufor; osiąga ok. 55°C.
@@ -53,20 +55,23 @@ Cel: dokument jest „kontraktem” dla agentów AI implementujących sterownik 
 - `climate.gabinet_ani`
 - `climate.lazienka_parter`
 - `climate.salon`
+- `climate.garaz`
 
 **Piętro (FF)**
 - `climate.sypialnia`
 - `climate.lazienka_pietro`
-- `climate.pokoj_z_oknem_naroznym`
-- `climate.pokoj_z_tarasem`
+- `climate.pokoj_narozny`
+- `climate.pokoj_z_garazem`
 
 Wykorzystywane atrybuty:
 - `current_temperature`
 - `temperature` (setpoint)
 
 ### 2.2 Pompa (zasilanie układu)
-- Włączanie (tylko ON): `switch.sonoff_10017fadeb`
-- Wyłączanie (tylko OFF): `input_button.wylacznik_pompy`
+- Włączanie (tylko ON): `script.uruchom_pompe`
+- Wyłączanie (tylko OFF): `script.wylacz_pompe`
+- Stan pracy (RUN-STATE): `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W) — pompa pracuje, gdy moc > 200 W (próg aplikacji 150 W dla marginesu)
+- Główny wyłącznik zasilania (tylko do odczytu): `switch.zasilanie_pompy_sonoff_10017fadeb_1`
 
 ### 2.3 Pogoda (Met.no)
 - `weather.forecast_home`
@@ -75,7 +80,7 @@ Wykorzystywane atrybuty:
 
 ## 3. Konfiguracja i stan – wymagane Helpers w Home Assistant
 
-### 3.1 Per pokój (7x)
+### 3.1 Per pokój (8x)
 Dla każdego pokoju `room_id` (np. `salon`, `sypialnia`):
 - `input_number.user_sp_<room_id>` – zapamiętany setpoint użytkownika (°C)
   - zakres: 5..30, krok: 0.5
@@ -89,10 +94,11 @@ Dla każdego pokoju `room_id` (np. `salon`, `sypialnia`):
 - `gabinet_ani`
 - `lazienka_parter`
 - `salon`
+- `garaz`
 - `sypialnia`
 - `lazienka_pietro`
-- `pokoj_z_oknem_naroznym`
-- `pokoj_z_tarasem`
+- `pokoj_narozny`
+- `pokoj_z_garazem`
 
 ### 3.2 Globalne parametry sterowania
 - `input_number.room_off_setpoint` (°C) = 7.0
@@ -143,7 +149,7 @@ Sterownik nigdy nie pozostawia aktywnych pokoi na GF i FF jednocześnie.
 
 ### 4.4 Okno OFF 01:00–06:00
 - Pompa nie może pracować w tym oknie.
-- Jeśli pompa jest ON o 01:00, sterownik inicjuje OFF przez `input_button.wylacznik_pompy` (z poszanowaniem `min_pump_on_min`, patrz 9.2).
+- Jeśli pompa jest ON o 01:00, sterownik inicjuje OFF przez `script.wylacz_pompe` (z poszanowaniem `min_pump_on_min`, patrz 9.2).
 
 ---
 
@@ -210,7 +216,7 @@ def _lerp_max_rooms(t_out):
 Tryb:
 - Liczba pokoi do grzania = `min(lerp_max_rooms(T_out), liczba pokoi na piętrze, liczba kandydatów z demand)`
 - Wybór pokoi następuje po sortowaniu według priority desc, deficit desc
-- System nigdy nie przekroczy liczby pokoi dostępnych na danym piętrze (max 3 dla GF, max 4 dla FF)
+- System nigdy nie przekroczy liczby pokoi dostępnych na danym piętrze (max 4 dla GF, max 4 dla FF)
 
 ### 6.3 Maksymalny czas ciągłego grzania pokoju
 Wymagane helpery:
@@ -291,12 +297,12 @@ to:
 
 ### 9.1 Definicje pomocnicze
 - `in_off_window(now)` – czy czas w [off_window_start, off_window_end)
-- `pump_is_on` – stan `switch.sonoff_10017fadeb` (lub inna encja statusu, jeśli switch jest tylko „enable”)
+- `pump_is_on` – odczytywany z miernika mocy `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W); pompa uznawana za pracującą, gdy moc > 200 W (aplikacja używa progu 150 W dla marginesu). Skrypty `script.uruchom_pompe` / `script.wylacz_pompe` służą tylko do sterowania, nie do odczytu stanu.
 
 ### 9.2 OFF window (noc)
 Jeśli `in_off_window(now)`:
 - Jeśli pompa ON:
-  - Jeżeli `now - last_pump_on >= min_pump_on_min` → wyłącz przez `input_button.wylacznik_pompy`.
+  - Jeżeli `now - last_pump_on >= min_pump_on_min` → wyłącz przez `script.wylacz_pompe`.
   - Jeżeli min_pump_on_min nie minął → **pozostaw ON** do spełnienia minimum, ale:
     - wymuś wyłączenie natychmiast po osiągnięciu `min_pump_on_min` (najbliższy tick).
 - Stan: `OFF_LOCKOUT` (nie uruchamiaj w tym oknie).
@@ -309,7 +315,7 @@ Poza off window:
   - `remaining_quota > 0`
 
 Akcja ON:
-- `switch.turn_on("switch.sonoff_10017fadeb")`
+- `script.turn_on("script.uruchom_pompe")`
 - `pump_starts_today += 1`
 - `last_pump_on = now`
 
@@ -321,7 +327,7 @@ Poza off window:
   - `remaining_quota == 0`
 
 Akcja OFF:
-- `input_button.press("input_button.wylacznik_pompy")`
+- `script.turn_on("script.wylacz_pompe")`
 - `last_pump_off = now`
 - stan = `OFF`
 
@@ -335,7 +341,8 @@ Akcja OFF:
   - fallback: użyj bieżącego `state_attr(climate.room,"temperature")` jeśli sensowne (np. 15..30),
   - inaczej fallback stały: 21.0.
 - Ustaw `automation_guard[room]=True`.
-- `climate.set_temperature(entity_id=climate.room, temperature=Tuser)`
+- `climate.set_temperature(entity_id=climate.room, temperature=min(30.0, Tuser + THERMOSTAT_OVERSHOOT))`
+  - `THERMOSTAT_OVERSHOOT = 2.0°C` utrzymuje zawór TRV otwarty poza jego wewnętrzną strefą martwą (~0.5°C); orchestrator i tak decyduje o „dogrzaniu” pokoju względem niezmienionego `Tuser`.
 - Po 1–3s: `automation_guard[room]=False`.
 
 ### 10.2 `disable_room(room)`
@@ -347,7 +354,9 @@ Akcja OFF:
 Warunek zapisu:
 - event: zmiana `state_attr(climate.room,"temperature")`
 - jeśli `automation_guard[room] == False`:
-  - zapisz do `input_number.user_sp_room` nową wartość (o ile jest w rozsądnym zakresie, np. 5..30).
+  - jeśli pokój jest aktualnie grzany (termostat trzymany na `Tuser + THERMOSTAT_OVERSHOOT`), odtwórz `Tuser` odejmując overshoot: `max(5.0, nowa_wartość - THERMOSTAT_OVERSHOOT)`; w przeciwnym razie weź wartość wprost.
+  - zapisz wynik do `input_number.user_sp_room` (o ile jest w rozsądnym zakresie, np. 5..30).
+  - zignoruj zbocze odzyskania `unavailable→available` (TRV wraca online z `old=None`), aby nie nadpisać `Tuser` wartością parkingową (`room_off_setpoint`).
 
 ---
 
@@ -416,7 +425,7 @@ Każdy tick, jeśli decyzja się zmienia lub co X minut:
 1. **Pamięć setpointu użytkownika**
    - Ustaw ręcznie 22°C w `climate.salon` → `input_number.user_sp_salon=22`.
    - Automat wyłączy salon (7°C) → `user_sp_salon` nie zmienia się.
-   - Automat ponownie włączy salon → setpoint wraca na 22°C.
+   - Automat ponownie włączy salon → `user_sp_salon` pozostaje 22°C, a termostat jest sterowany na 24°C (`Tuser + THERMOSTAT_OVERSHOOT`).
 
 2. **Zakaz grzania dwóch pięter naraz**
    - Przy demand na obu piętrach aktywne jest tylko jedno piętro; drugie ma wszystkie pokoje na 7°C.
@@ -428,9 +437,10 @@ Każdy tick, jeśli decyzja się zmienia lub co X minut:
 4. **Quota CWU**
    - Gdy pokoje dogrzane, a `pump_on_minutes_today < dhw_min_run_hours*60` → pompa przechodzi w `DHW_QUOTA` i dobija quota (poza off window).
 
-5. **Tryb zależny od temperatury zewnętrznej**
-   - Przy `T_out <= sequential_mode_temp` aktywne jest maks. 1 pomieszczenie na piętrze.
-   - Przy `T_out >= bulk_mode_temp` aktywne są wszystkie pomieszczenia z demand na piętrze.
+5. **Tryb zależny od temperatury zewnętrznej (LERP)**
+   - Przy `T_out <= lerp_temp_min` aktywne jest maks. `lerp_rooms_min` pomieszczeń na piętrze.
+   - Przy `T_out >= lerp_temp_max` aktywne jest maks. `lerp_rooms_max` pomieszczeń (ograniczone liczbą pokoi na piętrze i liczbą kandydatów z demand).
+   - Dla temperatur pośrednich liczba pokoi rośnie liniowo (floor) między `lerp_rooms_min` a `lerp_rooms_max`.
 
 6. **Anty-oscylacje**
    - Piętro nie przełącza się częściej niż `min_state_duration_min`.
@@ -466,7 +476,8 @@ Agent ma dostarczyć:
 ---
 
 ## 16. Uwagi implementacyjne (ważne)
-- Zawsze wyłączaj pompę przez `input_button.wylacznik_pompy` (nigdy przez switch OFF).
-- Switch `switch.sonoff_10017fadeb` używaj tylko do ON.
+- Zawsze wyłączaj pompę przez `script.wylacz_pompe` (graceful shutdown; nigdy przez wyłączenie zasilania).
+- Skrypt `script.uruchom_pompe` używaj tylko do ON.
+- Stan pracy pompy odczytuj z `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (próg 150 W), nie ze skryptów. `switch.zasilanie_pompy_sonoff_10017fadeb_1` jest tylko do odczytu.
 - Upewnij się, że logika `weather.get_forecasts` jest odporna na brak danych (wtedy użyj ostatniej znanej temperatury lub wartości neutralnej 0°C i zaloguj ostrzeżenie).
 - Przy pierwszym uruchomieniu, jeśli `user_sp_*` jest puste, wypełnij je z aktualnych setpointów termostatów (o ile w zakresie 5..30).

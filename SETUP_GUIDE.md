@@ -8,8 +8,8 @@
   - Climate entities for all thermostats (`climate.gabinet_ani`, `climate.lazienka_parter`, `climate.salon`, `climate.garaz`, `climate.sypialnia`, `climate.lazienka_pietro`, `climate.pokoj_narozny`, `climate.pokoj_z_garazem`)
   - Pump ON script: `script.uruchom_pompe`
   - Pump OFF script: `script.wylacz_pompe` (graceful shutdown; must exist before starting)
-  - Pump power meter: `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W) — used to detect pump run-state
-  - Pump mains master switch: `switch.zasilanie_pompy_sonoff_10017fadeb_1` (read-only safety context)
+  - Pump relay / run-state switch: `switch.zasilanie_pompy_sonoff_10017fadeb_1` — the `uruchom`/`wylacz` scripts toggle it; the orchestrator reads it as the authoritative pump on/off state
+  - Pump power meter: `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W) — used only as a health cross-check (commanded on but no draw → pump not running)
   - Weather: `weather.forecast_home` (Met.no integration)
 
 ---
@@ -23,7 +23,7 @@ The orchestrator turns the pump ON via `script.uruchom_pompe` and OFF via `scrip
 3. Create `script.uruchom_pompe` — the start sequence for the pump
 4. Create `script.wylacz_pompe` — the graceful shutdown sequence for the pump
 
-> **Note:** `script.wylacz_pompe` should perform the pump's graceful shutdown sequence. The orchestrator detects whether the pump is actually running by reading the power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (pump considered running when power > 200 W; the app uses a 150 W threshold for margin), not by reading the scripts. The mains master switch `switch.zasilanie_pompy_sonoff_10017fadeb_1` is read-only safety context.
+> **Important:** `script.uruchom_pompe` / `script.wylacz_pompe` must toggle the Sonoff relay `switch.zasilanie_pompy_sonoff_10017fadeb_1` — the orchestrator reads **that switch** as the authoritative pump on/off state. The power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` is used only as a health cross-check: if the pump is commanded on but draws < 50 W for ~5 min, the app logs a warning and sets `input_text.pump_health` to `NO_FLOW`.
 
 ---
 
@@ -175,7 +175,7 @@ Follow the [official AppDaemon installation docs](https://appdaemon.readthedocs.
        └── apps.yaml
    ```
 
-   > **Important:** Place both files directly in the `apps/` folder — do **not** put them inside a `heat_orchestrator/` subdirectory. AppDaemon would treat the directory name as a Python package and fail to find the class.
+   > **Note:** AppDaemon recursively scans every subdirectory of `apps/` and adds them to the import path, so the app loads whether the two files sit directly in `apps/` **or** in an `apps/heat_orchestrator/` subfolder — `module: heat_orchestrator` resolves either way. A subdirectory becomes a Python *package* (which would require the dotted `module: heat_orchestrator.heat_orchestrator`) **only** if you add an `__init__.py` to it, so don't add one. Also avoid two app modules with the same filename in different subfolders (AppDaemon's choice between duplicates is undefined).
 
 ---
 
@@ -188,7 +188,7 @@ Follow the [official AppDaemon installation docs](https://appdaemon.readthedocs.
    apps/heat_orchestrator/apps.yaml             →  <appdaemon_config>/apps/apps.yaml
    ```
 
-   > **Note:** The files in this repo are under `apps/heat_orchestrator/` for organisation, but on AppDaemon they must sit directly in `apps/`.
+   > **Note:** The files in this repo are under `apps/heat_orchestrator/` for organisation. You can copy that folder into AppDaemon's `apps/` as-is (it's scanned recursively) **or** flatten the two files directly into `apps/` — both work, and `module: heat_orchestrator` stays the same. Only add an `__init__.py` if you deliberately want a package, in which case change `apps.yaml` to `module: heat_orchestrator.heat_orchestrator`.
 
 2. AppDaemon will automatically detect the new files and load the app.
 
@@ -310,13 +310,13 @@ entities:
 
 ### Pump doesn't turn on
 - Verify `script.uruchom_pompe` exists and runs correctly
-- Confirm the power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` reports watts (pump considered running when power > 200 W; the app uses a 150 W threshold for margin)
+- Confirm `switch.zasilanie_pompy_sonoff_10017fadeb_1` switches ON when `script.uruchom_pompe` runs — the orchestrator reads this switch as the pump's on/off state
 - Check if you're inside the OFF window (01:00–06:00)
 - Check `input_number.min_pump_off_min` cooldown hasn't elapsed yet
 
 ### Pump doesn't turn off
 - The pump OFF uses `script.wylacz_pompe` – make sure it performs your graceful shutdown sequence
-- Verify the power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` drops below the threshold after shutdown (run-state is read from power, not from the script)
+- Verify `switch.zasilanie_pompy_sonoff_10017fadeb_1` switches OFF when `script.wylacz_pompe` runs (the orchestrator reads this switch, not power). Check the AppDaemon log for `[PUMP] OFF` and that `input_datetime.last_pump_off` updates
 - Check `input_number.min_pump_on_min` – the pump won't stop until this minimum is met
 
 ### User setpoints are lost
@@ -359,7 +359,9 @@ entities:
     │                     │  │                     │
     │                     │  │   script.wylacz_*   │
     │                     │  │   (pump OFF)        │
-    │                     │  │   sensor.*_power    │
+    │                     │  │   switch.*_1        │
     │                     │  │   (run-state)       │
+    │                     │  │   sensor.*_power    │
+    │                     │  │   (health check)    │
     └─────────────────────┘  └────────────────────┘
 ```

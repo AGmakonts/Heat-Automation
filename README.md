@@ -61,7 +61,7 @@ This system controls a heat pump powering underfloor heating across two manifold
 **Pump**
 - ON: `script.uruchom_pompe`
 - OFF: `script.wylacz_pompe` (graceful shutdown)
-- Run-state: detected from power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W) — pump considered running when power > 200 W (the app uses a 150 W threshold for margin). The mains master switch `switch.zasilanie_pompy_sonoff_10017fadeb_1` is read-only safety context.
+- Run-state: the relay switch `switch.zasilanie_pompy_sonoff_10017fadeb_1` — the `uruchom`/`wylacz` scripts toggle it, so it reflects the commanded on/off state instantly. The power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` is used **only** as a health cross-check: if the pump is commanded on but draws < 50 W for several minutes, it's flagged `NO_FLOW` (`input_text.pump_health`).
 
 **Weather**
 - `weather.forecast_home` (Met.no)

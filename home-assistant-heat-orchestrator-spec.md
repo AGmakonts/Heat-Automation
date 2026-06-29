@@ -25,8 +25,8 @@ Cel: dokument jest „kontraktem” dla agentów AI implementujących sterownik 
 - Pompa:
   - ON: `script.uruchom_pompe` (**tylko włączanie**).
   - OFF: `script.wylacz_pompe` (graceful shutdown, wymagane do wyłączania).
-  - Stan pracy (RUN-STATE) odczytywany z miernika mocy `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W) — pompa uznawana za pracującą, gdy moc > 200 W (aplikacja używa progu 150 W dla marginesu).
-  - Główny wyłącznik zasilania `switch.zasilanie_pompy_sonoff_10017fadeb_1` jest tylko do odczytu (kontekst bezpieczeństwa).
+  - Stan pracy (RUN-STATE): przełącznik przekaźnika `switch.zasilanie_pompy_sonoff_10017fadeb_1` — skrypty uruchom/wylacz przełączają go, więc odzwierciedla zakomenderowany stan natychmiast (źródło prawdy dla `pump_is_on`).
+  - Miernik mocy `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W) służy **tylko** jako kontrola sprawności: jeśli pompa jest zakomenderowana ON, ale pobiera < 50 W przez kilka minut, prawdopodobnie nie pracuje (`input_text.pump_health = NO_FLOW`).
 - CWU/bojler:
   - Brak czujników.
   - Bojler traktowany jako bufor; osiąga ok. 55°C.
@@ -70,8 +70,8 @@ Wykorzystywane atrybuty:
 ### 2.2 Pompa (zasilanie układu)
 - Włączanie (tylko ON): `script.uruchom_pompe`
 - Wyłączanie (tylko OFF): `script.wylacz_pompe`
-- Stan pracy (RUN-STATE): `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W) — pompa pracuje, gdy moc > 200 W (próg aplikacji 150 W dla marginesu)
-- Główny wyłącznik zasilania (tylko do odczytu): `switch.zasilanie_pompy_sonoff_10017fadeb_1`
+- Stan pracy (RUN-STATE): przełącznik `switch.zasilanie_pompy_sonoff_10017fadeb_1` (przełączany przez skrypty uruchom/wylacz)
+- Kontrola sprawności (tylko diagnostyka): `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W) — ON bez poboru mocy ⇒ pompa może nie pracować
 
 ### 2.3 Pogoda (Met.no)
 - `weather.forecast_home`
@@ -297,7 +297,7 @@ to:
 
 ### 9.1 Definicje pomocnicze
 - `in_off_window(now)` – czy czas w [off_window_start, off_window_end)
-- `pump_is_on` – odczytywany z miernika mocy `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W); pompa uznawana za pracującą, gdy moc > 200 W (aplikacja używa progu 150 W dla marginesu). Skrypty `script.uruchom_pompe` / `script.wylacz_pompe` służą tylko do sterowania, nie do odczytu stanu.
+- `pump_is_on` – odczytywany ze stanu przełącznika `switch.zasilanie_pompy_sonoff_10017fadeb_1` (skrypty `uruchom_pompe`/`wylacz_pompe` przełączają go, więc odzwierciedla zakomenderowany stan natychmiast). Miernik mocy `sensor.zasilanie_pompy_sonoff_10017fadeb_power` **nie** służy do określania stanu — tylko do kontroli sprawności (ON bez poboru mocy ⇒ ostrzeżenie + `input_text.pump_health = NO_FLOW`).
 
 ### 9.2 OFF window (noc)
 Jeśli `in_off_window(now)`:
@@ -478,6 +478,6 @@ Agent ma dostarczyć:
 ## 16. Uwagi implementacyjne (ważne)
 - Zawsze wyłączaj pompę przez `script.wylacz_pompe` (graceful shutdown; nigdy przez wyłączenie zasilania).
 - Skrypt `script.uruchom_pompe` używaj tylko do ON.
-- Stan pracy pompy odczytuj z `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (próg 150 W), nie ze skryptów. `switch.zasilanie_pompy_sonoff_10017fadeb_1` jest tylko do odczytu.
+- Stan pracy pompy odczytuj ze stanu przełącznika `switch.zasilanie_pompy_sonoff_10017fadeb_1` (przełączanego przez skrypty), nie z poboru mocy. Miernik mocy `sensor.zasilanie_pompy_sonoff_10017fadeb_power` używaj tylko jako kontrolę sprawności (próg ~50 W).
 - Upewnij się, że logika `weather.get_forecasts` jest odporna na brak danych (wtedy użyj ostatniej znanej temperatury lub wartości neutralnej 0°C i zaloguj ostrzeżenie).
 - Przy pierwszym uruchomieniu, jeśli `user_sp_*` jest puste, wypełnij je z aktualnych setpointów termostatów (o ile w zakresie 5..30).

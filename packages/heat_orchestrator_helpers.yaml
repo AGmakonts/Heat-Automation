@@ -483,3 +483,9 @@ input_text:
     initial: ""
     max: 255
     icon: mdi:door
+
+  pump_health:
+    name: "Pump Health"
+    initial: "OFF"
+    max: 20
+    icon: mdi:heart-pulse

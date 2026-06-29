@@ -143,6 +143,8 @@ views:
         entities:
           - entity: sensor.zasilanie_pompy_sonoff_10017fadeb_power
             name: Pump power (W)
+          - entity: input_text.pump_health
+            name: Pump health (power check)
           - entity: input_number.pump_on_minutes_today
             name: Pump minutes today
           - entity: input_number.pump_starts_today

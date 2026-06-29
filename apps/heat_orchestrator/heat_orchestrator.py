@@ -69,17 +69,18 @@ ALL_ROOMS = list(ROOMS)
 # ---------------------------------------------------------------------------
 # Pump control
 # ---------------------------------------------------------------------------
-# On/off are HA scripts. Script entities have no persistent pump run-state, so
-# actual run-state is read from the power meter: the pump draws >200 W when
-# running and far less when idle, so PUMP_RUNNING_WATTS (150) sits safely
-# between the two as the discrimination threshold (tunable). The mains switch
-# is read-only safety context.
+# On/off are HA scripts (uruchom/wylacz) which toggle the Sonoff relay. The
+# relay switch flips instantly with the command, so it is the authoritative
+# "is the pump on" signal (PUMP_SWITCH). The Sonoff also meters power, used
+# ONLY as a health cross-check: if the pump is commanded ON (switch on) but
+# draws almost nothing for a while, it likely is not actually running.
+# (Idle/circulation ~100 W; compressor running >1000 W; truly off/dead ~0 W.)
 PUMP_START_SCRIPT = "script.uruchom_pompe"
 PUMP_STOP_SCRIPT = "script.wylacz_pompe"
+PUMP_SWITCH = "switch.zasilanie_pompy_sonoff_10017fadeb_1"
 PUMP_POWER_SENSOR = "sensor.zasilanie_pompy_sonoff_10017fadeb_power"
-PUMP_MAINS_SWITCH = "switch.zasilanie_pompy_sonoff_10017fadeb_1"
-PUMP_RUNNING_WATTS = 150.0
-PUMP_SPINUP_GRACE_SEC = 120  # power lags the start/stop command; debounce window
+PUMP_HEALTH_MIN_WATTS = 50.0   # below this while commanded ON = suspicious
+PUMP_HEALTH_GRACE_MIN = 5.0    # ignore the first minutes after a start (spin-up)
 
 WEATHER_ENTITY = "weather.forecast_home"
 
@@ -112,23 +113,9 @@ class HeatOrchestrator(hass.Hass):
         # Last known outdoor temperature (fallback)
         self._last_outdoor_temp: float | None = None
 
-        # Pump command intent (debounces the power sensor start/stop lag).
-        # Rehydrate from the persisted last_pump_on/off timestamps so a restart
-        # mid-ramp doesn't re-fire the start script or double-count a start.
-        self._pump_intent: str | None = None
-        self._pump_intent_ts: datetime.datetime | None = None
-        _on_min = self._minutes_since("input_datetime.last_pump_on")
-        _off_min = self._minutes_since("input_datetime.last_pump_off")
-        if (
-            _on_min is not None
-            and (_off_min is None or _on_min <= _off_min)
-            and _on_min * 60.0 < PUMP_SPINUP_GRACE_SEC
-        ):
-            self._pump_intent = "on"
-            self._pump_intent_ts = self.datetime() - datetime.timedelta(minutes=_on_min)
-        elif _off_min is not None and _off_min * 60.0 < PUMP_SPINUP_GRACE_SEC:
-            self._pump_intent = "off"
-            self._pump_intent_ts = self.datetime() - datetime.timedelta(minutes=_off_min)
+        # Pump health (power-meter cross-check) — diagnostic only, never used to
+        # decide whether the pump is on. "OK" | "NO_FLOW" | "OFF" | "UNKNOWN".
+        self._pump_health: str | None = None
 
         # Track last decision tick log to avoid spam
         self._last_logged_state: str | None = None
@@ -222,9 +209,15 @@ class HeatOrchestrator(hass.Hass):
             return None
 
     def _pump_is_on(self) -> bool:
-        """Pump is running when its power draw exceeds the running threshold."""
-        power = self._get_number(PUMP_POWER_SENSOR)
-        return power is not None and power > PUMP_RUNNING_WATTS
+        """Authoritative pump state = the Sonoff relay (mains) switch.
+
+        The uruchom/wylacz scripts toggle this switch, so it reflects the
+        commanded state immediately. Power draw is deliberately NOT used here:
+        the heat pump's compressor cycles on its own thermostat, so power dips
+        to idle while the pump is still on. Power is only a health cross-check
+        (see _check_pump_health).
+        """
+        return self.get_state(PUMP_SWITCH) == "on"
 
     def _get_fsm_state(self) -> str:
         val = self.get_state("input_text.heat_state")
@@ -648,25 +641,10 @@ class HeatOrchestrator(hass.Hass):
     # Pump control
     # -----------------------------------------------------------------------
     def _pump_on(self):
-        now = self.datetime()
         if self._pump_is_on():
-            return
-        # Power lags the start command; suppress duplicate starts during ramp-up.
-        if (
-            self._pump_intent == "on"
-            and self._pump_intent_ts is not None
-            and (now - self._pump_intent_ts).total_seconds() < PUMP_SPINUP_GRACE_SEC
-        ):
-            return
-        if self.get_state(PUMP_MAINS_SWITCH) == "off":
-            self.log(
-                f"[PUMP] mains switch {PUMP_MAINS_SWITCH} is OFF; start may not take effect",
-                level="WARNING",
-            )
+            return  # switch already on
         self.call_service("script/turn_on", entity_id=PUMP_START_SCRIPT)
-        self._pump_intent = "on"
-        self._pump_intent_ts = now
-        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        now_str = self.datetime().strftime("%Y-%m-%d %H:%M:%S")
         self.call_service(
             "input_datetime/set_datetime",
             entity_id="input_datetime.last_pump_on",
@@ -678,26 +656,51 @@ class HeatOrchestrator(hass.Hass):
         self.log("[PUMP] ON (script.uruchom_pompe)")
 
     def _pump_off(self):
-        now = self.datetime()
-        # Power decays after the stop command; suppress duplicate stops.
-        if (
-            self._pump_intent == "off"
-            and self._pump_intent_ts is not None
-            and (now - self._pump_intent_ts).total_seconds() < PUMP_SPINUP_GRACE_SEC
-        ):
-            return
         if not self._pump_is_on():
-            return
+            return  # switch already off
         self.call_service("script/turn_on", entity_id=PUMP_STOP_SCRIPT)
-        self._pump_intent = "off"
-        self._pump_intent_ts = now
-        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        now_str = self.datetime().strftime("%Y-%m-%d %H:%M:%S")
         self.call_service(
             "input_datetime/set_datetime",
             entity_id="input_datetime.last_pump_off",
             datetime=now_str,
         )
         self.log("[PUMP] OFF (graceful, script.wylacz_pompe)")
+
+    def _check_pump_health(self):
+        """Cross-check commanded pump state against measured power draw.
+
+        Diagnostic only — does NOT influence control. Flags the case where the
+        orchestrator commanded the pump ON (switch on) but it draws almost
+        nothing (so it likely is not actually running). The first few minutes
+        after a start are ignored to allow relay + pump spin-up.
+        """
+        if not self._pump_is_on():
+            self._set_pump_health("OFF")
+            return
+        mins_on = self._minutes_since("input_datetime.last_pump_on")
+        if mins_on is not None and mins_on < PUMP_HEALTH_GRACE_MIN:
+            return  # within spin-up grace; don't judge yet
+        power = self._get_number(PUMP_POWER_SENSOR)
+        if power is None:
+            self._set_pump_health("UNKNOWN")
+        elif power < PUMP_HEALTH_MIN_WATTS:
+            self._set_pump_health("NO_FLOW", power=power)
+        else:
+            self._set_pump_health("OK")
+
+    def _set_pump_health(self, status: str, power: float | None = None):
+        if status != self._pump_health:
+            if status == "NO_FLOW":
+                self.log(
+                    f"[HEALTH] pump commanded ON but power={power:.0f}W "
+                    f"(<{PUMP_HEALTH_MIN_WATTS:.0f}W) — pump may not be running",
+                    level="WARNING",
+                )
+            self._pump_health = status
+        entity = "input_text.pump_health"
+        if self.entity_exists(entity) and self.get_state(entity) != status:
+            self.call_service("input_text/set_value", entity_id=entity, value=status)
 
     def _minutes_since(self, dt_entity: str) -> float | None:
         val = self.get_state(dt_entity)
@@ -841,6 +844,9 @@ class HeatOrchestrator(hass.Hass):
             on_min = self._get_number("input_number.pump_on_minutes_today") or 0.0
             self._set_number("input_number.pump_on_minutes_today", on_min + 1)
 
+        # --- Pump health cross-check (power vs commanded state) ---
+        self._check_pump_health()
+
         # --- Per-room heating minutes accounting ---
         for room in ALL_ROOMS:
             if self._is_room_heating(room):
@@ -882,20 +888,8 @@ class HeatOrchestrator(hass.Hass):
 
         t_out = self._get_outdoor_temp()
 
-        # A graceful stop was just commanded but the power sensor lags (power
-        # decays for up to PUMP_SPINUP_GRACE_SEC after the stop script runs).
-        # Treat that window as OFF for control so we don't re-open valves on a
-        # pump that is shutting down and then flap OFF→HEAT→OFF. This restores
-        # the old switch-based instant-off behaviour and lets the normal
-        # min_pump_off cooldown govern the next start.
-        pump_stopping = (
-            self._pump_intent == "off"
-            and self._pump_intent_ts is not None
-            and (now - self._pump_intent_ts).total_seconds() < PUMP_SPINUP_GRACE_SEC
-        )
-
         # --- 3. If pump is OFF ---
-        if not self._pump_is_on() or pump_stopping:
+        if not self._pump_is_on():
             # Check min_pump_off cooldown
             mins_off = self._minutes_since("input_datetime.last_pump_off")
             cooldown_ok = mins_off is None or mins_off >= self.min_pump_off

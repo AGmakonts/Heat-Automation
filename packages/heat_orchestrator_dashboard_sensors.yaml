@@ -1,0 +1,204 @@
+# =============================================================================
+# Heat Orchestrator – Dashboard helper sensors
+# =============================================================================
+# Template sensors that expose, per room, the current temperature, the
+# thermostat target ("set") temperature and the delta (current − User SP),
+# plus the remaining daily DHW quota. They exist purely to feed the dashboard
+# graphs: the built-in history-graph card cannot plot climate attributes or
+# compute a delta directly.
+#
+# Include as a package alongside the helpers, e.g. in configuration.yaml:
+#   homeassistant:
+#     packages:
+#       heat_orchestrator: !include packages/heat_orchestrator_helpers.yaml
+#       heat_orchestrator_dashboard: !include packages/heat_orchestrator_dashboard_sensors.yaml
+#
+# Names are intentionally ASCII so the auto-generated entity IDs are
+# deterministic: sensor.ho_temp_<room>, sensor.ho_target_<room>,
+# sensor.ho_delta_<room>, sensor.ho_dhw_quota_remaining. Friendly (Polish)
+# labels are applied in the dashboard, not here.
+# =============================================================================
+template:
+  - sensor:
+      # ===== Current temperature (climate current_temperature) =====
+      - name: "HO Temp Gabinet Ani"
+        unique_id: ho_temp_gabinet_ani
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.gabinet_ani','current_temperature') is not none }}"
+        state: "{{ state_attr('climate.gabinet_ani','current_temperature') }}"
+      - name: "HO Temp Lazienka Parter"
+        unique_id: ho_temp_lazienka_parter
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.lazienka_parter','current_temperature') is not none }}"
+        state: "{{ state_attr('climate.lazienka_parter','current_temperature') }}"
+      - name: "HO Temp Salon"
+        unique_id: ho_temp_salon
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.salon','current_temperature') is not none }}"
+        state: "{{ state_attr('climate.salon','current_temperature') }}"
+      - name: "HO Temp Garaz"
+        unique_id: ho_temp_garaz
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.garaz','current_temperature') is not none }}"
+        state: "{{ state_attr('climate.garaz','current_temperature') }}"
+      - name: "HO Temp Sypialnia"
+        unique_id: ho_temp_sypialnia
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.sypialnia','current_temperature') is not none }}"
+        state: "{{ state_attr('climate.sypialnia','current_temperature') }}"
+      - name: "HO Temp Lazienka Pietro"
+        unique_id: ho_temp_lazienka_pietro
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.lazienka_pietro','current_temperature') is not none }}"
+        state: "{{ state_attr('climate.lazienka_pietro','current_temperature') }}"
+      - name: "HO Temp Pokoj Narozny"
+        unique_id: ho_temp_pokoj_narozny
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.pokoj_narozny','current_temperature') is not none }}"
+        state: "{{ state_attr('climate.pokoj_narozny','current_temperature') }}"
+      - name: "HO Temp Pokoj Z Garazem"
+        unique_id: ho_temp_pokoj_z_garazem
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.pokoj_z_garazem','current_temperature') is not none }}"
+        state: "{{ state_attr('climate.pokoj_z_garazem','current_temperature') }}"
+
+      # ===== Thermostat set temperature (climate target temperature) =====
+      - name: "HO Target Gabinet Ani"
+        unique_id: ho_target_gabinet_ani
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.gabinet_ani','temperature') is not none }}"
+        state: "{{ state_attr('climate.gabinet_ani','temperature') }}"
+      - name: "HO Target Lazienka Parter"
+        unique_id: ho_target_lazienka_parter
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.lazienka_parter','temperature') is not none }}"
+        state: "{{ state_attr('climate.lazienka_parter','temperature') }}"
+      - name: "HO Target Salon"
+        unique_id: ho_target_salon
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.salon','temperature') is not none }}"
+        state: "{{ state_attr('climate.salon','temperature') }}"
+      - name: "HO Target Garaz"
+        unique_id: ho_target_garaz
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.garaz','temperature') is not none }}"
+        state: "{{ state_attr('climate.garaz','temperature') }}"
+      - name: "HO Target Sypialnia"
+        unique_id: ho_target_sypialnia
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.sypialnia','temperature') is not none }}"
+        state: "{{ state_attr('climate.sypialnia','temperature') }}"
+      - name: "HO Target Lazienka Pietro"
+        unique_id: ho_target_lazienka_pietro
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.lazienka_pietro','temperature') is not none }}"
+        state: "{{ state_attr('climate.lazienka_pietro','temperature') }}"
+      - name: "HO Target Pokoj Narozny"
+        unique_id: ho_target_pokoj_narozny
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.pokoj_narozny','temperature') is not none }}"
+        state: "{{ state_attr('climate.pokoj_narozny','temperature') }}"
+      - name: "HO Target Pokoj Z Garazem"
+        unique_id: ho_target_pokoj_z_garazem
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('climate.pokoj_z_garazem','temperature') is not none }}"
+        state: "{{ state_attr('climate.pokoj_z_garazem','temperature') }}"
+
+      # ===== Delta (current temp − User SP); negative = below target =====
+      - name: "HO Delta Gabinet Ani"
+        unique_id: ho_delta_gabinet_ani
+        unit_of_measurement: "°C"
+        availability: >
+          {{ state_attr('climate.gabinet_ani','current_temperature') is not none
+             and states('input_number.user_sp_gabinet_ani') not in ['unknown','unavailable'] }}
+        state: >
+          {{ (state_attr('climate.gabinet_ani','current_temperature')
+              - states('input_number.user_sp_gabinet_ani')|float) | round(2) }}
+      - name: "HO Delta Lazienka Parter"
+        unique_id: ho_delta_lazienka_parter
+        unit_of_measurement: "°C"
+        availability: >
+          {{ state_attr('climate.lazienka_parter','current_temperature') is not none
+             and states('input_number.user_sp_lazienka_parter') not in ['unknown','unavailable'] }}
+        state: >
+          {{ (state_attr('climate.lazienka_parter','current_temperature')
+              - states('input_number.user_sp_lazienka_parter')|float) | round(2) }}
+      - name: "HO Delta Salon"
+        unique_id: ho_delta_salon
+        unit_of_measurement: "°C"
+        availability: >
+          {{ state_attr('climate.salon','current_temperature') is not none
+             and states('input_number.user_sp_salon') not in ['unknown','unavailable'] }}
+        state: >
+          {{ (state_attr('climate.salon','current_temperature')
+              - states('input_number.user_sp_salon')|float) | round(2) }}
+      - name: "HO Delta Garaz"
+        unique_id: ho_delta_garaz
+        unit_of_measurement: "°C"
+        availability: >
+          {{ state_attr('climate.garaz','current_temperature') is not none
+             and states('input_number.user_sp_garaz') not in ['unknown','unavailable'] }}
+        state: >
+          {{ (state_attr('climate.garaz','current_temperature')
+              - states('input_number.user_sp_garaz')|float) | round(2) }}
+      - name: "HO Delta Sypialnia"
+        unique_id: ho_delta_sypialnia
+        unit_of_measurement: "°C"
+        availability: >
+          {{ state_attr('climate.sypialnia','current_temperature') is not none
+             and states('input_number.user_sp_sypialnia') not in ['unknown','unavailable'] }}
+        state: >
+          {{ (state_attr('climate.sypialnia','current_temperature')
+              - states('input_number.user_sp_sypialnia')|float) | round(2) }}
+      - name: "HO Delta Lazienka Pietro"
+        unique_id: ho_delta_lazienka_pietro
+        unit_of_measurement: "°C"
+        availability: >
+          {{ state_attr('climate.lazienka_pietro','current_temperature') is not none
+             and states('input_number.user_sp_lazienka_pietro') not in ['unknown','unavailable'] }}
+        state: >
+          {{ (state_attr('climate.lazienka_pietro','current_temperature')
+              - states('input_number.user_sp_lazienka_pietro')|float) | round(2) }}
+      - name: "HO Delta Pokoj Narozny"
+        unique_id: ho_delta_pokoj_narozny
+        unit_of_measurement: "°C"
+        availability: >
+          {{ state_attr('climate.pokoj_narozny','current_temperature') is not none
+             and states('input_number.user_sp_pokoj_narozny') not in ['unknown','unavailable'] }}
+        state: >
+          {{ (state_attr('climate.pokoj_narozny','current_temperature')
+              - states('input_number.user_sp_pokoj_narozny')|float) | round(2) }}
+      - name: "HO Delta Pokoj Z Garazem"
+        unique_id: ho_delta_pokoj_z_garazem
+        unit_of_measurement: "°C"
+        availability: >
+          {{ state_attr('climate.pokoj_z_garazem','current_temperature') is not none
+             and states('input_number.user_sp_pokoj_z_garazem') not in ['unknown','unavailable'] }}
+        state: >
+          {{ (state_attr('climate.pokoj_z_garazem','current_temperature')
+              - states('input_number.user_sp_pokoj_z_garazem')|float) | round(2) }}
+
+      # ===== Remaining DHW quota for today =====
+      - name: "HO DHW Quota Remaining"
+        unique_id: ho_dhw_quota_remaining
+        unit_of_measurement: "min"
+        icon: mdi:water-boiler
+        state: >
+          {{ [ (states('input_number.dhw_min_run_hours')|float(0) * 60)
+               - states('input_number.pump_on_minutes_today')|float(0), 0 ] | max | round(0) }}

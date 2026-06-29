@@ -1,0 +1,343 @@
+# =============================================================================
+# Heat Orchestrator – Lovelace dashboard
+# =============================================================================
+# Two ways to use this file:
+#
+#  A) Quick: open a dashboard → Edit → (⋮) Raw configuration editor → paste the
+#     content BELOW the comments (from `title:` down).
+#
+#  B) YAML-mode dashboard (in configuration.yaml):
+#       lovelace:
+#         dashboards:
+#           heat-orchestrator:
+#             mode: yaml
+#             title: Heat Orchestrator
+#             icon: mdi:radiator
+#             show_in_sidebar: true
+#             filename: dashboards/heat_orchestrator.yaml
+#
+# Requires the template sensors from
+# packages/heat_orchestrator_dashboard_sensors.yaml (sensor.ho_*) for the
+# Temperatures view. Everything else uses the standard helper entities.
+# =============================================================================
+title: Heat Orchestrator
+views:
+  # ============================ CONTROL ============================
+  - title: Control
+    path: control
+    icon: mdi:tune-variant
+    cards:
+      - type: entities
+        title: Target temperatures (User SP)
+        state_color: true
+        entities:
+          - entity: input_number.user_sp_gabinet_ani
+            name: Gabinet Ani
+          - entity: input_number.user_sp_lazienka_parter
+            name: Łazienka Parter
+          - entity: input_number.user_sp_salon
+            name: Salon
+          - entity: input_number.user_sp_garaz
+            name: Garaż
+          - entity: input_number.user_sp_sypialnia
+            name: Sypialnia
+          - entity: input_number.user_sp_lazienka_pietro
+            name: Łazienka Piętro
+          - entity: input_number.user_sp_pokoj_narozny
+            name: Pokój narożny
+          - entity: input_number.user_sp_pokoj_z_garazem
+            name: Pokój z garażem
+
+      - type: entities
+        title: Room priorities (higher = heated first)
+        entities:
+          - entity: input_number.priority_gabinet_ani
+            name: Gabinet Ani
+          - entity: input_number.priority_lazienka_parter
+            name: Łazienka Parter
+          - entity: input_number.priority_salon
+            name: Salon
+          - entity: input_number.priority_garaz
+            name: Garaż
+          - entity: input_number.priority_sypialnia
+            name: Sypialnia
+          - entity: input_number.priority_lazienka_pietro
+            name: Łazienka Piętro
+          - entity: input_number.priority_pokoj_narozny
+            name: Pokój narożny
+          - entity: input_number.priority_pokoj_z_garazem
+            name: Pokój z garażem
+
+      - type: entities
+        title: Heating tuning
+        entities:
+          - entity: input_number.room_off_setpoint
+            name: Room OFF setpoint
+          - entity: input_number.heating_hyst_on
+            name: Hysteresis ON
+          - entity: input_number.heating_hyst_off
+            name: Hysteresis OFF
+          - entity: input_number.min_state_duration_min
+            name: Min floor state duration
+          - entity: input_number.min_pump_on_min
+            name: Min pump ON time
+          - entity: input_number.min_pump_off_min
+            name: Min pump OFF time
+          - entity: input_number.dhw_min_run_hours
+            name: DHW min daily hours
+          - entity: input_number.max_continuous_heating_min
+            name: Max continuous heating
+
+      - type: entities
+        title: Room scaling (LERP by outdoor temp)
+        entities:
+          - entity: input_number.lerp_temp_min
+            name: Temp min (→ fewest rooms)
+          - entity: input_number.lerp_temp_max
+            name: Temp max (→ most rooms)
+          - entity: input_number.lerp_rooms_min
+            name: Rooms min
+          - entity: input_number.lerp_rooms_max
+            name: Rooms max
+
+      - type: entities
+        title: OFF window & daily reset
+        entities:
+          - entity: input_datetime.off_window_start
+            name: OFF window start
+          - entity: input_datetime.off_window_end
+            name: OFF window end
+          - entity: input_datetime.day_reset_time
+            name: Daily reset time
+
+      - type: entities
+        title: Legacy (retained, not used by selection)
+        entities:
+          - entity: input_number.bulk_mode_temp
+            name: Bulk mode temp
+          - entity: input_number.sequential_mode_temp
+            name: Sequential mode temp
+          - entity: input_number.max_rooms_limited
+            name: Max rooms (limited)
+
+  # ============================ STATUS ============================
+  - title: Status
+    path: status
+    icon: mdi:heart-pulse
+    cards:
+      - type: entities
+        title: Orchestrator state
+        state_color: true
+        entities:
+          - entity: input_text.heat_state
+            name: FSM state
+          - entity: input_text.active_floor
+            name: Active floor
+          - entity: input_text.active_rooms
+            name: Active rooms
+          - entity: input_datetime.state_since
+            name: State since
+
+      - type: entities
+        title: Pump
+        entities:
+          - entity: sensor.zasilanie_pompy_sonoff_10017fadeb_power
+            name: Pump power (W)
+          - entity: input_number.pump_on_minutes_today
+            name: Pump minutes today
+          - entity: input_number.pump_starts_today
+            name: Pump starts today
+          - entity: sensor.ho_dhw_quota_remaining
+            name: DHW quota remaining
+          - entity: input_datetime.last_pump_on
+            name: Last pump ON
+          - entity: input_datetime.last_pump_off
+            name: Last pump OFF
+          - entity: switch.zasilanie_pompy_sonoff_10017fadeb_1
+            name: Pump mains (read-only)
+
+      - type: glance
+        title: Heating now
+        state_color: true
+        columns: 4
+        entities:
+          - entity: input_boolean.heating_gabinet_ani
+            name: Gabinet Ani
+          - entity: input_boolean.heating_lazienka_parter
+            name: Łaz. Parter
+          - entity: input_boolean.heating_salon
+            name: Salon
+          - entity: input_boolean.heating_garaz
+            name: Garaż
+          - entity: input_boolean.heating_sypialnia
+            name: Sypialnia
+          - entity: input_boolean.heating_lazienka_pietro
+            name: Łaz. Piętro
+          - entity: input_boolean.heating_pokoj_narozny
+            name: Narożny
+          - entity: input_boolean.heating_pokoj_z_garazem
+            name: Z garażem
+
+      - type: entities
+        title: Heating minutes today
+        entities:
+          - entity: input_number.heating_minutes_gabinet_ani
+            name: Gabinet Ani
+          - entity: input_number.heating_minutes_lazienka_parter
+            name: Łazienka Parter
+          - entity: input_number.heating_minutes_salon
+            name: Salon
+          - entity: input_number.heating_minutes_garaz
+            name: Garaż
+          - entity: input_number.heating_minutes_sypialnia
+            name: Sypialnia
+          - entity: input_number.heating_minutes_lazienka_pietro
+            name: Łazienka Piętro
+          - entity: input_number.heating_minutes_pokoj_narozny
+            name: Pokój narożny
+          - entity: input_number.heating_minutes_pokoj_z_garazem
+            name: Pokój z garażem
+
+  # ========================= TEMPERATURES =========================
+  - title: Temperatures
+    path: temperatures
+    icon: mdi:thermometer-lines
+    cards:
+      - type: history-graph
+        title: Current temperatures — all rooms
+        hours_to_show: 24
+        entities:
+          - entity: sensor.ho_temp_gabinet_ani
+            name: Gabinet Ani
+          - entity: sensor.ho_temp_lazienka_parter
+            name: Łazienka Parter
+          - entity: sensor.ho_temp_salon
+            name: Salon
+          - entity: sensor.ho_temp_garaz
+            name: Garaż
+          - entity: sensor.ho_temp_sypialnia
+            name: Sypialnia
+          - entity: sensor.ho_temp_lazienka_pietro
+            name: Łazienka Piętro
+          - entity: sensor.ho_temp_pokoj_narozny
+            name: Pokój narożny
+          - entity: sensor.ho_temp_pokoj_z_garazem
+            name: Pokój z garażem
+
+      - type: history-graph
+        title: Temperature delta (current − User SP)
+        hours_to_show: 24
+        entities:
+          - entity: sensor.ho_delta_gabinet_ani
+            name: Gabinet Ani
+          - entity: sensor.ho_delta_lazienka_parter
+            name: Łazienka Parter
+          - entity: sensor.ho_delta_salon
+            name: Salon
+          - entity: sensor.ho_delta_garaz
+            name: Garaż
+          - entity: sensor.ho_delta_sypialnia
+            name: Sypialnia
+          - entity: sensor.ho_delta_lazienka_pietro
+            name: Łazienka Piętro
+          - entity: sensor.ho_delta_pokoj_narozny
+            name: Pokój narożny
+          - entity: sensor.ho_delta_pokoj_z_garazem
+            name: Pokój z garażem
+
+      - type: history-graph
+        title: Gabinet Ani — temp / set / User SP
+        hours_to_show: 24
+        entities:
+          - { entity: sensor.ho_temp_gabinet_ani, name: Current }
+          - { entity: sensor.ho_target_gabinet_ani, name: Thermostat set }
+          - { entity: input_number.user_sp_gabinet_ani, name: User SP }
+      - type: history-graph
+        title: Łazienka Parter — temp / set / User SP
+        hours_to_show: 24
+        entities:
+          - { entity: sensor.ho_temp_lazienka_parter, name: Current }
+          - { entity: sensor.ho_target_lazienka_parter, name: Thermostat set }
+          - { entity: input_number.user_sp_lazienka_parter, name: User SP }
+      - type: history-graph
+        title: Salon — temp / set / User SP
+        hours_to_show: 24
+        entities:
+          - { entity: sensor.ho_temp_salon, name: Current }
+          - { entity: sensor.ho_target_salon, name: Thermostat set }
+          - { entity: input_number.user_sp_salon, name: User SP }
+      - type: history-graph
+        title: Garaż — temp / set / User SP
+        hours_to_show: 24
+        entities:
+          - { entity: sensor.ho_temp_garaz, name: Current }
+          - { entity: sensor.ho_target_garaz, name: Thermostat set }
+          - { entity: input_number.user_sp_garaz, name: User SP }
+      - type: history-graph
+        title: Sypialnia — temp / set / User SP
+        hours_to_show: 24
+        entities:
+          - { entity: sensor.ho_temp_sypialnia, name: Current }
+          - { entity: sensor.ho_target_sypialnia, name: Thermostat set }
+          - { entity: input_number.user_sp_sypialnia, name: User SP }
+      - type: history-graph
+        title: Łazienka Piętro — temp / set / User SP
+        hours_to_show: 24
+        entities:
+          - { entity: sensor.ho_temp_lazienka_pietro, name: Current }
+          - { entity: sensor.ho_target_lazienka_pietro, name: Thermostat set }
+          - { entity: input_number.user_sp_lazienka_pietro, name: User SP }
+      - type: history-graph
+        title: Pokój narożny — temp / set / User SP
+        hours_to_show: 24
+        entities:
+          - { entity: sensor.ho_temp_pokoj_narozny, name: Current }
+          - { entity: sensor.ho_target_pokoj_narozny, name: Thermostat set }
+          - { entity: input_number.user_sp_pokoj_narozny, name: User SP }
+      - type: history-graph
+        title: Pokój z garażem — temp / set / User SP
+        hours_to_show: 24
+        entities:
+          - { entity: sensor.ho_temp_pokoj_z_garazem, name: Current }
+          - { entity: sensor.ho_target_pokoj_z_garazem, name: Thermostat set }
+          - { entity: input_number.user_sp_pokoj_z_garazem, name: User SP }
+
+  # ======================= HEATING TIMELINE =======================
+  - title: Heating Timeline
+    path: heating-timeline
+    icon: mdi:chart-timeline
+    cards:
+      - type: history-graph
+        title: Heating state (FSM)
+        hours_to_show: 48
+        entities:
+          - entity: input_text.heat_state
+            name: State
+
+      - type: history-graph
+        title: Active floor
+        hours_to_show: 48
+        entities:
+          - entity: input_text.active_floor
+            name: Floor
+
+      - type: history-graph
+        title: When each room was heated
+        hours_to_show: 48
+        entities:
+          - entity: input_boolean.heating_gabinet_ani
+            name: Gabinet Ani
+          - entity: input_boolean.heating_lazienka_parter
+            name: Łazienka Parter
+          - entity: input_boolean.heating_salon
+            name: Salon
+          - entity: input_boolean.heating_garaz
+            name: Garaż
+          - entity: input_boolean.heating_sypialnia
+            name: Sypialnia
+          - entity: input_boolean.heating_lazienka_pietro
+            name: Łazienka Piętro
+          - entity: input_boolean.heating_pokoj_narozny
+            name: Pokój narożny
+          - entity: input_boolean.heating_pokoj_z_garazem
+            name: Pokój z garażem

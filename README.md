@@ -35,7 +35,10 @@ This system controls a heat pump powering underfloor heating across two manifold
 │       ├── heat_orchestrator.py   # AppDaemon app (FSM + control logic)
 │       └── apps.yaml              # AppDaemon app registration
 ├── packages/
-│   └── heat_orchestrator_helpers.yaml  # HA helpers (58 entities)
+│   ├── heat_orchestrator_helpers.yaml           # HA helpers (58 entities)
+│   └── heat_orchestrator_dashboard_sensors.yaml # Template sensors for graphs
+├── dashboards/
+│   └── heat_orchestrator.yaml     # Lovelace dashboard (control + diagnostics + graphs)
 ├── home-assistant-heat-orchestrator-spec.md  # Full specification
 ├── SETUP_GUIDE.md                 # Detailed step-by-step setup
 └── README.md

@@ -130,9 +130,9 @@ INFO heat_orchestrator: === HeatOrchestrator ready ===
 | Min pump ON time | 40 min | `input_number.min_pump_on_min` |
 | Min pump OFF time | 25 min | `input_number.min_pump_off_min` |
 | DHW min daily hours | 3.5 h | `input_number.dhw_min_run_hours` |
-| Bulk mode threshold | +5°C | `input_number.bulk_mode_temp` |
-| Sequential mode threshold | -5°C | `input_number.sequential_mode_temp` |
-| Max rooms (limited mode) | 2 | `input_number.max_rooms_limited` |
+| Bulk mode threshold (legacy, unused) | +5°C | `input_number.bulk_mode_temp` |
+| Sequential mode threshold (legacy, unused) | -5°C | `input_number.sequential_mode_temp` |
+| Max rooms, limited mode (legacy, unused) | 2 | `input_number.max_rooms_limited` |
 | Max continuous heating time | 120 min | `input_number.max_continuous_heating_min` |
 | LERP temp min (1 room) | -10°C | `input_number.lerp_temp_min` |
 | LERP temp max (max rooms) | +10°C | `input_number.lerp_temp_max` |

@@ -91,8 +91,6 @@ Then create global helpers:
 | Number | `lerp_rooms_min` ✅ | 1–3 | 1 | 1 | – |
 | Number | `lerp_rooms_max` ✅ | 1–7 | 1 | 5 | – |
 | DateTime (time only) | `off_window_start` | – | – | 01:00 | – |
-
-> **Note:** Helpers marked with ⚠️ (`bulk_mode_temp`, `sequential_mode_temp`, `max_rooms_limited`) are retained for backward compatibility but are **not actively used** for room selection. The system now uses LERP-based helpers (marked with ✅) to determine how many rooms to heat based on outdoor temperature.
 | DateTime (time only) | `off_window_end` | – | – | 06:00 | – |
 | DateTime (time only) | `day_reset_time` | – | – | 00:00 | – |
 | DateTime (date+time) | `state_since` | – | – | – | – |
@@ -101,6 +99,8 @@ Then create global helpers:
 | Text | `heat_state` | – | – | OFF | – |
 | Text | `active_floor` | – | – | none | – |
 | Text | `active_rooms` | – | – | (empty) | – |
+
+> **Note:** Helpers marked with ⚠️ (`bulk_mode_temp`, `sequential_mode_temp`, `max_rooms_limited`) are retained for backward compatibility but are **not actively used** for room selection. The system now uses the LERP-based helpers (marked with ✅) to determine how many rooms to heat based on outdoor temperature.
 
 ---
 
@@ -230,9 +230,10 @@ All parameters are adjustable live via the UI without restarting anything:
 | `input_number.min_pump_on_min` | Min pump run before allowing shutdown | Helpers page |
 | `input_number.min_pump_off_min` | Cooldown period after pump stops | Helpers page |
 | `input_number.dhw_min_run_hours` | Daily pump quota for hot water | Helpers page |
-| `input_number.bulk_mode_temp` | Above this outdoor temp → heat all demanding rooms | Helpers page |
-| `input_number.sequential_mode_temp` | Below this outdoor temp → heat only 1 room | Helpers page |
-| `input_number.max_rooms_limited` | Number of rooms in "limited" mode | Helpers page |
+| `input_number.lerp_temp_min` | Outdoor temp at/below which the room count is clamped to `lerp_rooms_min` | Helpers page |
+| `input_number.lerp_temp_max` | Outdoor temp at/above which the room count reaches `lerp_rooms_max` | Helpers page |
+| `input_number.lerp_rooms_min` | Fewest rooms heated at once (cold end of the LERP) | Helpers page |
+| `input_number.lerp_rooms_max` | Most rooms heated at once (mild end of the LERP) | Helpers page |
 | `input_number.priority_<room>` | Room priority (higher = heated first) | Helpers page |
 
 ---
@@ -292,9 +293,10 @@ entities:
   - entity: input_number.min_pump_on_min
   - entity: input_number.min_pump_off_min
   - entity: input_number.dhw_min_run_hours
-  - entity: input_number.bulk_mode_temp
-  - entity: input_number.sequential_mode_temp
-  - entity: input_number.max_rooms_limited
+  - entity: input_number.lerp_temp_min
+  - entity: input_number.lerp_temp_max
+  - entity: input_number.lerp_rooms_min
+  - entity: input_number.lerp_rooms_max
 ```
 
 ---
@@ -341,7 +343,7 @@ entities:
 │  │   1. Check OFF window                           │ │
 │  │   2. Calculate demand per room / floor          │ │
 │  │   3. Select active floor (highest score)        │ │
-│  │   4. Select rooms (bulk/limited/sequential)     │ │
+│  │   4. Select rooms (LERP by outdoor temp)        │ │
 │  │   5. Enable/disable rooms via thermostats       │ │
 │  │   6. Control pump ON/OFF                        │ │
 │  │   7. Handle DHW quota                           │ │

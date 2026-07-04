@@ -110,6 +110,8 @@ Dla każdego pokoju `room_id` (np. `salon`, `sypialnia`):
 - `input_number.dhw_min_run_hours` (h) – minimalna praca pompy na dobę (domyślnie 3.5)
 - `input_number.pump_on_minutes_today` (min) – licznik czasu pracy pompy w dobie (sterowany przez AppDaemon)
 - `input_datetime.day_reset_time` – reset liczników (domyślnie 00:00)
+- `input_number.dhw_exclusive_max_run_min` (min) – maksymalny ciągły bieg pompy, gdy quota CWU jest jedynym powodem pracy (domyślnie 45; 0 = bez limitu)
+- `input_number.dhw_exclusive_pause_min` (min) – przerwa między biegami CWU-only (domyślnie 90; 0 = bez przerw)
 
 ### 3.5 Diagnostyka / runtime (wymagane)
 - `input_text.heat_state` – stan automatu:
@@ -257,6 +259,25 @@ to:
 - **wszystkie** pokoje ustaw na OFF setpoint (7°C)
 - pompa może być ON do czasu `remaining == 0` (o ile nie wejdziemy w okno OFF)
 
+### 7.3 Duty-cycle CWU-only (rozłożenie quota w ciągu dnia)
+Stan `DHW_QUOTA` występuje wyłącznie przy braku demand pokoi, więc jest z definicji
+„ekskluzywny" – grzanie wody jest jedynym powodem pracy pompy. Aby latem quota nie
+była dobijana jednym ciągłym blokiem zaraz po oknie OFF, praca CWU-only jest cykliczna:
+
+- Funkcja aktywna tylko gdy `dhw_exclusive_max_run_min > 0` **i** `dhw_exclusive_pause_min > 0`;
+  wartość 0 któregokolwiek helpera przywraca zachowanie ciągłe.
+- **Limit biegu:** gdy stan `DHW_QUOTA` trwa co najmniej `dhw_exclusive_max_run_min`
+  (czas liczony od `state_since`, więc obejmuje wyłącznie czas ekskluzywny), pompa
+  jest wyłączana (`reason=dhw_exclusive_max_run`), stan → `OFF`. `min_pump_on_min`
+  ma priorytet: efektywny limit to `max(dhw_exclusive_max_run_min, min_pump_on_min)`.
+- **Przerwa:** start pompy z powodu quota (brak demand) wymaga, aby od `last_pump_off`
+  minęło `max(min_pump_off_min, dhw_exclusive_pause_min)`. Start z powodu demand pokoi
+  nie jest opóźniany przez tę przerwę i podlega wyłącznie `min_pump_off_min`.
+- Pojawienie się demand w trakcie biegu CWU-only przełącza normalnie do `HEAT_*`
+  (bez wyłączania pompy); przejście `HEAT_* → DHW_QUOTA` resetuje `state_since`,
+  więc limit liczy się od początku pracy ekskluzywnej.
+- Cykl `DHW_QUOTA → OFF → (przerwa) → DHW_QUOTA` powtarza się aż `remaining == 0`.
+
 ---
 
 ## 8. Wybór piętra i pokoi
@@ -402,11 +423,11 @@ Każdy tick, jeśli decyzja się zmienia lub co X minut:
 3. Oblicz demand GF/FF
 4. Jeśli pompa OFF:
    - jeśli demand (GF/FF) → włącz i wybierz piętro
-   - else jeśli remaining_quota>0 → włącz i `DHW_QUOTA`
+   - else jeśli remaining_quota>0 **i minęła przerwa CWU-only (7.3)** → włącz i `DHW_QUOTA`
    - else pozostań OFF
 5. Jeśli pompa ON:
    - jeśli demand istnieje → `HEAT_GF` lub `HEAT_FF` wg skoringu i min_state_duration
-   - else jeśli remaining_quota>0 → `DHW_QUOTA`
+   - else jeśli remaining_quota>0 → `DHW_QUOTA`; **po przekroczeniu limitu biegu CWU-only (7.3) → pompa OFF, stan OFF**
    - else (brak demand i quota==0) → OFF (zgodnie z 9.4)
 
 ---
@@ -458,6 +479,8 @@ Agent ma dostarczyć:
 - `min_pump_on_min = 40`
 - `min_pump_off_min = 25`
 - `dhw_min_run_hours = 3.5`
+- `dhw_exclusive_max_run_min = 45`
+- `dhw_exclusive_pause_min = 90`
 - `bulk_mode_temp = +5°C`
 - `sequential_mode_temp = -5°C`
 - `max_rooms_limited = 2`

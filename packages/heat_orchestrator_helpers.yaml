@@ -206,6 +206,31 @@ input_number:
     unit_of_measurement: "min"
     icon: mdi:counter
 
+  # Max continuous pump run when DHW quota is the ONLY reason the pump is on
+  # (no room demand). 0 disables duty-cycling (single continuous quota run).
+  # min_pump_on takes precedence: effective max run is
+  # max(dhw_exclusive_max_run_min, min_pump_on_min).
+  dhw_exclusive_max_run_min:
+    name: "DHW Quota Exclusive Max Duration"
+    min: 0
+    max: 240
+    step: 5
+    initial: 45
+    unit_of_measurement: "min"
+    icon: mdi:timer-sand
+
+  # Pause between DHW-only runs. 0 disables duty-cycling. Room-demand starts
+  # are never delayed by this pause; effective pause before a DHW-only start
+  # is max(dhw_exclusive_pause_min, min_pump_off_min).
+  dhw_exclusive_pause_min:
+    name: "DHW Quota Exclusive Pause Duration"
+    min: 0
+    max: 360
+    step: 5
+    initial: 90
+    unit_of_measurement: "min"
+    icon: mdi:timer-pause
+
   # ---------------------------------------------------------------------------
   # Temperature mode thresholds
   # ---------------------------------------------------------------------------

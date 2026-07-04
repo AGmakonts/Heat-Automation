@@ -223,6 +223,21 @@ class HeatOrchestrator(hass.Hass):
         return self._param("input_number.dhw_min_run_hours", 3.5)
 
     @property
+    def dhw_exclusive_max_run(self) -> float:
+        """Max continuous DHW-only run [min]; 0 disables duty-cycling."""
+        return self._param("input_number.dhw_exclusive_max_run_min", 45.0)
+
+    @property
+    def dhw_exclusive_pause(self) -> float:
+        """Pause between DHW-only runs [min]; 0 disables duty-cycling."""
+        return self._param("input_number.dhw_exclusive_pause_min", 90.0)
+
+    def _dhw_duty_cycle_enabled(self) -> bool:
+        """Duty-cycling of DHW-only runs is active only when both the max run
+        and the pause are configured to non-zero values."""
+        return self.dhw_exclusive_max_run > 0 and self.dhw_exclusive_pause > 0
+
+    @property
     def bulk_mode_temp(self) -> float:
         return self._param("input_number.bulk_mode_temp", 5.0)
 
@@ -795,6 +810,14 @@ class HeatOrchestrator(hass.Hass):
             mins_off = self._minutes_since("input_datetime.last_pump_off")
             cooldown_ok = mins_off is None or mins_off >= self.min_pump_off
 
+            # DHW-only starts additionally honor the exclusive pause, so the
+            # daily quota gets spread across the day instead of running as one
+            # continuous block. Room-demand starts are never delayed by this.
+            dhw_pause_ok = True
+            if self._dhw_duty_cycle_enabled():
+                required_pause = max(self.min_pump_off, self.dhw_exclusive_pause)
+                dhw_pause_ok = mins_off is None or mins_off >= required_pause
+
             if has_demand and cooldown_ok:
                 # Pick floor
                 floor = "GF" if score_gf >= score_ff else "FF"
@@ -807,7 +830,7 @@ class HeatOrchestrator(hass.Hass):
                     f"floor={floor} GF_score={score_gf:.1f} FF_score={score_ff:.1f} "
                     f"Tout={t_out:.1f} quota_remaining={remaining_quota:.0f}"
                 )
-            elif remaining_quota > 0 and cooldown_ok:
+            elif remaining_quota > 0 and cooldown_ok and dhw_pause_ok:
                 # DHW quota mode
                 self._disable_all_rooms()
                 self._pump_on()
@@ -824,6 +847,9 @@ class HeatOrchestrator(hass.Hass):
                     reason = "no_demand_no_quota"
                     if not cooldown_ok:
                         reason = f"pump_cooldown ({mins_off:.0f}/{self.min_pump_off:.0f})"
+                    elif remaining_quota > 0 and not dhw_pause_ok:
+                        required_pause = max(self.min_pump_off, self.dhw_exclusive_pause)
+                        reason = f"dhw_exclusive_pause ({mins_off:.0f}/{required_pause:.0f})"
                     self.log(
                         f"[DECISION] state=OFF reason={reason} "
                         f"Tout={t_out:.1f} quota_remaining={remaining_quota:.0f}"
@@ -893,6 +919,36 @@ class HeatOrchestrator(hass.Hass):
                     f"[DECISION] state=DHW_QUOTA reason=quota "
                     f"quota_remaining={remaining_quota:.0f}"
                 )
+            elif self._dhw_duty_cycle_enabled():
+                # DHW quota is the only reason the pump is running. Limit the
+                # continuous run so the quota gets spread across the day;
+                # the pause before the next run is enforced at pump start.
+                # state_since is set on every entry into DHW_QUOTA, so it
+                # measures exclusive-run time only.
+                state_since = self._get_state_since()
+                if state_since is not None:
+                    elapsed = (now - state_since).total_seconds() / 60.0
+                    if elapsed >= self.dhw_exclusive_max_run:
+                        mins_on = self._minutes_since("input_datetime.last_pump_on")
+                        if mins_on is not None and mins_on >= self.min_pump_on:
+                            self._pump_off()
+                            self._set_fsm_state(STATE_OFF)
+                            self.log(
+                                f"[DECISION] state=OFF reason=dhw_exclusive_max_run "
+                                f"({elapsed:.0f}/{self.dhw_exclusive_max_run:.0f} min) "
+                                f"pause={max(self.min_pump_off, self.dhw_exclusive_pause):.0f} min "
+                                f"quota_remaining={remaining_quota:.0f}"
+                            )
+                        else:
+                            # Compressor protection wins: effective max run is
+                            # max(dhw_exclusive_max_run, min_pump_on).
+                            if self._tick_counter % self._log_every_n_ticks == 0:
+                                mins_on_str = f"{mins_on:.0f}" if mins_on is not None else "unknown"
+                                self.log(
+                                    f"[DECISION] state=DHW_QUOTA exclusive max run reached "
+                                    f"but waiting for min_pump_on "
+                                    f"({mins_on_str}/{self.min_pump_on:.0f} min)"
+                                )
 
         else:
             # No demand, no quota → pump off

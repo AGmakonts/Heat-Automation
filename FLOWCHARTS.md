@@ -41,8 +41,11 @@ flowchart TD
     HAS_DEMAND_OFF -- Yes --> PICK_FLOOR_OFF[Pick floor with\nhighest score\nGF vs FF]
     HAS_DEMAND_OFF -- No --> QUOTA_OFF{Remaining\nquota > 0?}
 
-    QUOTA_OFF -- Yes --> DHW_START[Disable all rooms\nPump ON\nSet state = DHW_QUOTA]
+    QUOTA_OFF -- Yes --> DHW_PAUSE_OK{DHW exclusive\npause elapsed?}
     QUOTA_OFF -- No --> STAY_OFF
+
+    DHW_PAUSE_OK -- Yes --> DHW_START[Disable all rooms\nPump ON\nSet state = DHW_QUOTA]
+    DHW_PAUSE_OK -- No --> STAY_OFF
 
     PICK_FLOOR_OFF --> APPLY_FLOOR_OFF[Apply floor selection\nPump ON\nSet state = HEAT_GF / HEAT_FF]
 
@@ -56,8 +59,12 @@ flowchart TD
     HAS_DEMAND_ON -- Yes --> DET_ACTIVE[Determine active floor\nfrom current FSM state]
     HAS_DEMAND_ON -- No --> QUOTA_ON{Remaining\nquota > 0?}
 
-    QUOTA_ON -- Yes --> DHW_CONTINUE[Disable all rooms\nSet state = DHW_QUOTA]
+    QUOTA_ON -- Yes --> DHW_MAX_RUN{DHW exclusive\nmax run reached\n& min_pump_on met?}
     QUOTA_ON -- No --> MIN_ON_OFF{min_pump_on\nelapsed?}
+
+    DHW_MAX_RUN -- Yes --> DHW_PAUSE_START[Pump OFF\nSet state = OFF\nPause before next DHW run]
+    DHW_MAX_RUN -- No --> DHW_CONTINUE[Disable all rooms\nSet state = DHW_QUOTA]
+    DHW_PAUSE_START --> TICK_END
 
     MIN_ON_OFF -- Yes --> PUMP_OFF_DEMAND[Pump OFF\nDisable all rooms\nSet state = OFF]
     MIN_ON_OFF -- No --> WAIT_PUMP[Wait for min_pump_on\nbefore turning OFF]
@@ -159,7 +166,7 @@ flowchart TD
     OFF_LOCKOUT -. "exit OFF window" .-> OFF
     OFF -. "demand detected" .-> HEAT_GF
     OFF -. "demand detected" .-> HEAT_FF
-    OFF -. "quota remaining" .-> DHW_QUOTA
+    OFF -. "quota remaining\n& exclusive pause elapsed" .-> DHW_QUOTA
     HEAT_GF -. "FF scores higher\n& min_state elapsed" .-> HEAT_FF
     HEAT_FF -. "GF scores higher\n& min_state elapsed" .-> HEAT_GF
     HEAT_GF -. "no demand,\nquota remaining" .-> DHW_QUOTA
@@ -169,6 +176,7 @@ flowchart TD
     DHW_QUOTA -. "demand detected" .-> HEAT_GF
     DHW_QUOTA -. "demand detected" .-> HEAT_FF
     DHW_QUOTA -. "quota filled" .-> OFF
+    DHW_QUOTA -. "exclusive max run\nreached" .-> OFF
 
     %% ── Actuator connections ──
     HEAT_GF --> PUMP_ON_ACT
@@ -221,5 +229,6 @@ flowchart TD
 - **Floor Exclusivity**: Only one floor (GF or FF) can heat at a time — never both
 - **LERP**: The number of rooms heated simultaneously scales linearly with outdoor temperature
 - **DHW Quota**: When no rooms need heating, the pump may still run to meet a daily minimum run-time for domestic hot water
+- **DHW Duty-Cycling**: DHW-only runs (no room demand) are capped at `dhw_exclusive_max_run_min` and separated by `dhw_exclusive_pause_min`, spreading the quota across the day; either helper set to 0 disables this and restores one continuous run
 - **Cooldown**: Rooms that have been heating continuously for too long are forced into a cooldown period
 - **Automation Guard**: Prevents automation-driven setpoint changes from being recorded as user changes

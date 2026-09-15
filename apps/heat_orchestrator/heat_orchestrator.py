@@ -505,6 +505,9 @@ class HeatOrchestrator(hass.Hass):
 
     def _reset_heating_minutes(self, room: str):
         """Reset accumulated heating minutes for a room to zero."""
+        current = self._get_number(ROOMS[room].heating_minutes)
+        if current is not None and current == 0:
+            return  # already zero — skip the service call (called every tick)
         self._set_heating_minutes(room, 0)
 
     def _enable_room(self, room: str):
@@ -648,6 +651,24 @@ class HeatOrchestrator(hass.Hass):
             f"[USER] {room} setpoint changed → user_sp={stored_val}°C "
             f"(thermostat shown: {new_val}°C)"
         )
+
+        # Log the resulting demand evaluation right away, so a "nothing
+        # happened" outcome is explainable from the log alone (hysteresis
+        # vs missing temperature reading).
+        t_cur = self._get_climate_current_temp(room)
+        if t_cur is None:
+            self.log(
+                f"[USER] {room} current_temperature unavailable — "
+                f"demand cannot be evaluated",
+                level="WARNING",
+            )
+        else:
+            threshold = stored_val - self.hyst_on
+            verdict = "demand" if t_cur < threshold else "no demand (hysteresis)"
+            self.log(
+                f"[USER] {room} demand check: t_cur={t_cur}°C "
+                f"threshold={threshold:.1f}°C → {verdict}"
+            )
 
     def _on_weather_change(self, entity, attribute, old, new, **kwargs):
         pass  # Tick handles weather; this is placeholder for potential future use
@@ -888,8 +909,12 @@ class HeatOrchestrator(hass.Hass):
             else:
                 if current_state != STATE_OFF_LOCKOUT:
                     self._set_fsm_state(STATE_OFF_LOCKOUT)
-                    self._disable_all_rooms()
                     self.log(f"[DECISION] state=OFF_LOCKOUT reason=off_window")
+                # Idempotent re-park: a manual setpoint change while parked is
+                # recorded in user_sp by the listener, but must not linger on
+                # the TRV (open valve, misleading display) until the next
+                # state transition.
+                self._disable_all_rooms()
             return
 
         # --- 2. Compute demand and quota ---
@@ -941,7 +966,10 @@ class HeatOrchestrator(hass.Hass):
             else:
                 if current_state != STATE_OFF:
                     self._set_fsm_state(STATE_OFF)
-                    self._disable_all_rooms()
+                # Idempotent re-park (see OFF_LOCKOUT): keeps TRVs at the off
+                # setpoint while the state is steady OFF, so a manual setpoint
+                # change that produced no demand does not stay on the TRV.
+                self._disable_all_rooms()
                 if self._tick_counter % self._log_every_n_ticks == 0:
                     reason = "no_demand_no_quota"
                     if not cooldown_ok:

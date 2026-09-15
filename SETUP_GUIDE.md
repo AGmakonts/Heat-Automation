@@ -5,25 +5,25 @@
 - Home Assistant instance running (HAOS, Docker, or Core)
 - AppDaemon 4.x add-on / installation
 - The following integrations already configured:
-  - Climate entities for all thermostats (`climate.gabinet_ani`, `climate.lazienka_parter`, `climate.salon`, `climate.sypialnia`, `climate.lazienka_pietro`, `climate.pokoj_z_oknem_naroznym`, `climate.pokoj_z_tarasem`)
-  - Pump switch: `switch.sonoff_10017fadeb`
-  - Pump OFF button: `input_button.wylacznik_pompy` (must exist before starting)
+  - Climate entities for all thermostats (`climate.gabinet_ani`, `climate.lazienka_parter`, `climate.salon`, `climate.garaz`, `climate.sypialnia`, `climate.lazienka_pietro`, `climate.pokoj_narozny`, `climate.pokoj_z_garazem`)
+  - Pump start/stop scripts: `script.uruchom_pompe`, `script.wylacz_pompe`
+  - Pump relay switch: `switch.zasilanie_pompy_sonoff_10017fadeb_1` (authoritative on/off state)
+  - Pump power sensor: `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (health cross-check)
   - Weather: `weather.forecast_home` (Met.no integration)
 
 ---
 
-## Step 1: Create the Input Button (if it doesn't exist)
+## Step 1: Create the Pump Scripts (if they don't exist)
 
-If `input_button.wylacznik_pompy` doesn't already exist, create it:
+The orchestrator starts and stops the pump via two HA scripts that toggle the
+Sonoff relay:
 
-1. Go to **Settings → Devices & services → Helpers**
-2. Click **+ Create Helper**
-3. Choose **Button**
-4. Name: `Wyłącznik Pompy`
-5. Entity ID will be `input_button.wylacznik_pompy`
-6. Click **Create**
+1. `script.uruchom_pompe` — turns the relay on (pump start)
+2. `script.wylacz_pompe` — performs the pump's graceful shutdown sequence and
+   turns the relay off
 
-> **Note:** This button should trigger an automation or script that performs the pump's graceful shutdown sequence.
+Both must exist before starting the app; the relay switch state is used as the
+authoritative "pump is on" signal.
 
 ---
 
@@ -62,7 +62,7 @@ If you prefer not to use packages, create each helper manually through the UI:
 
 **Settings → Devices & services → Helpers → + Create Helper**
 
-For each room (`gabinet_ani`, `lazienka_parter`, `salon`, `sypialnia`, `lazienka_pietro`, `pokoj_z_oknem_naroznym`, `pokoj_z_tarasem`):
+For each room (`gabinet_ani`, `lazienka_parter`, `salon`, `garaz`, `sypialnia`, `lazienka_pietro`, `pokoj_narozny`, `pokoj_z_garazem`):
 
 1. **Number** – `user_sp_<room_id>` (range 5–30, step 0.5, unit °C)
 2. **Number** – `priority_<room_id>` (range 1–100, step 1)
@@ -272,18 +272,18 @@ entities:
     name: Heating Sypialnia
   - entity: input_boolean.heating_lazienka_pietro
     name: Heating Łazienka Piętro
-  - entity: input_boolean.heating_pokoj_z_oknem_naroznym
-    name: Heating Pokój z oknem narożnym
-  - entity: input_boolean.heating_pokoj_z_tarasem
-    name: Heating Pokój z tarasem
+  - entity: input_boolean.heating_pokoj_narozny
+    name: Heating Pokój narożny
+  - entity: input_boolean.heating_pokoj_z_garazem
+    name: Heating Pokój z garażem
   - type: divider
   - entity: input_number.user_sp_salon
   - entity: input_number.user_sp_sypialnia
   - entity: input_number.user_sp_gabinet_ani
   - entity: input_number.user_sp_lazienka_parter
   - entity: input_number.user_sp_lazienka_pietro
-  - entity: input_number.user_sp_pokoj_z_oknem_naroznym
-  - entity: input_number.user_sp_pokoj_z_tarasem
+  - entity: input_number.user_sp_pokoj_narozny
+  - entity: input_number.user_sp_pokoj_z_garazem
   - type: divider
   - entity: input_number.heating_hyst_on
   - entity: input_number.heating_hyst_off
@@ -308,12 +308,12 @@ entities:
 - Verify all helper entities exist (the app handles missing entities gracefully but logs warnings)
 
 ### Pump doesn't turn on
-- Verify `switch.sonoff_10017fadeb` is available and controllable
+- Verify `script.uruchom_pompe` works and `switch.zasilanie_pompy_sonoff_10017fadeb_1` is available
 - Check if you're inside the OFF window (01:00–06:00)
 - Check `input_number.min_pump_off_min` cooldown hasn't elapsed yet
 
 ### Pump doesn't turn off
-- The pump OFF uses `input_button.wylacznik_pompy` – make sure it triggers your graceful shutdown automation
+- The pump OFF uses `script.wylacz_pompe` – make sure it performs the graceful shutdown sequence and turns the relay off
 - Check `input_number.min_pump_on_min` – the pump won't stop until this minimum is met
 
 ### User setpoints are lost

@@ -48,16 +48,19 @@ This system controls a heat pump powering underfloor heating across two manifold
 - `climate.gabinet_ani`
 - `climate.lazienka_parter`
 - `climate.salon`
+- `climate.garaz`
 
 **First Floor (FF)**
 - `climate.sypialnia`
 - `climate.lazienka_pietro`
-- `climate.pokoj_z_oknem_naroznym`
-- `climate.pokoj_z_tarasem`
+- `climate.pokoj_narozny`
+- `climate.pokoj_z_garazem`
 
 **Pump**
-- ON: `switch.sonoff_10017fadeb`
-- OFF: `input_button.wylacznik_pompy` (graceful shutdown)
+- ON: `script.uruchom_pompe`
+- OFF: `script.wylacz_pompe` (graceful shutdown)
+- State: `switch.zasilanie_pompy_sonoff_10017fadeb_1` (authoritative on/off)
+- Health: `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (power cross-check, diagnostic only)
 
 **Weather**
 - `weather.forecast_home` (Met.no)

@@ -70,8 +70,10 @@ ALL_ROOMS = list(ROOMS)
 # Pump control
 # ---------------------------------------------------------------------------
 # On/off are HA scripts (uruchom/wylacz) which toggle the Sonoff relay. The
-# relay switch flips instantly with the command, so it is the authoritative
-# "is the pump on" signal (PUMP_SWITCH). The Sonoff also meters power, used
+# relay switch follows the command within a tick or so (production logs show
+# it can still read "on" one tick after wylacz — see PUMP_STOP_SETTLE_MIN),
+# so it is the authoritative "is the pump on" signal (PUMP_SWITCH). The Sonoff
+# also meters power, used
 # ONLY as a health cross-check: if the pump is commanded ON (switch on) but
 # draws almost nothing for a while, it likely is not actually running.
 # (Idle/circulation ~100 W; compressor running >1000 W; truly off/dead ~0 W.)
@@ -81,6 +83,7 @@ PUMP_SWITCH = "switch.zasilanie_pompy_sonoff_10017fadeb_1"
 PUMP_POWER_SENSOR = "sensor.zasilanie_pompy_sonoff_10017fadeb_power"
 PUMP_HEALTH_MIN_WATTS = 50.0   # below this while commanded ON = suspicious
 PUMP_HEALTH_GRACE_MIN = 5.0    # ignore the first minutes after a start (spin-up)
+PUMP_STOP_SETTLE_MIN = 3.0     # after wylacz the relay may still read "on" for a tick or two
 
 WEATHER_ENTITY = "weather.forecast_home"
 
@@ -218,6 +221,21 @@ class HeatOrchestrator(hass.Hass):
         (see _check_pump_health).
         """
         return self.get_state(PUMP_SWITCH) == "on"
+
+    def _pump_stopping(self) -> bool:
+        """True while a stop command is settling: wylacz_pompe was called less
+        than PUMP_STOP_SETTLE_MIN ago, no start was issued since, but the relay
+        still reads "on". Without this the tick after a stop sees "pump on"
+        and re-enters DHW_QUOTA/HEAT_* (resetting state_since) or re-fires the
+        stop script and re-stamps last_pump_off.
+        """
+        if not self._pump_is_on():
+            return False
+        mins_off = self._minutes_since("input_datetime.last_pump_off")
+        if mins_off is None or mins_off >= PUMP_STOP_SETTLE_MIN:
+            return False
+        mins_on = self._minutes_since("input_datetime.last_pump_on")
+        return mins_on is None or mins_on > mins_off
 
     def _get_fsm_state(self) -> str:
         val = self.get_state("input_text.heat_state")
@@ -415,13 +433,21 @@ class HeatOrchestrator(hass.Hass):
     # -----------------------------------------------------------------------
     # Demand model
     # -----------------------------------------------------------------------
+    def _is_unmanaged(self, room: str) -> bool:
+        """Room was marked unmanaged after failed commands; the mark expires
+        after 15 minutes (and is cleared here when it does)."""
+        marked = self.unmanaged_rooms.get(room)
+        if marked is None:
+            return False
+        if self.datetime() - marked < datetime.timedelta(minutes=15):
+            return True
+        del self.unmanaged_rooms[room]
+        return False
+
     def _need_heat(self, room: str) -> bool:
         """Room needs heating: Tcur < Tuser - hyst_on."""
-        if room in self.unmanaged_rooms:
-            if self.datetime() - self.unmanaged_rooms[room] < datetime.timedelta(minutes=15):
-                return False
-            else:
-                del self.unmanaged_rooms[room]
+        if self._is_unmanaged(room):
+            return False
 
         t_cur = self._get_climate_current_temp(room)
         t_user = self._get_number(ROOMS[room].user_sp)
@@ -449,11 +475,8 @@ class HeatOrchestrator(hass.Hass):
         This creates the proper two-threshold hysteresis band.
         """
         # Respect unmanaged room timeout
-        if room in self.unmanaged_rooms:
-            if self.datetime() - self.unmanaged_rooms[room] < datetime.timedelta(minutes=15):
-                return False
-            else:
-                del self.unmanaged_rooms[room]
+        if self._is_unmanaged(room):
+            return False
 
         if self._is_room_heating(room):
             # Currently heating → keep going until satisfied (offset threshold)
@@ -558,6 +581,14 @@ class HeatOrchestrator(hass.Hass):
         if current_sp is not None and abs(current_sp - off_sp) < 0.05:
             self._set_heating_sensor(room, False)
             return  # already at off setpoint
+        if current_sp is None:
+            # TRV unavailable (no setpoint attribute). This runs every tick in
+            # steady OFF, so don't hammer an offline device; it is re-parked
+            # on the first tick after it comes back.
+            self._set_heating_sensor(room, False)
+            return
+        if self._is_unmanaged(room):
+            return  # recent command failures; retried after the 15 min timeout
 
         self.automation_guard[room] = True
         try:
@@ -694,6 +725,8 @@ class HeatOrchestrator(hass.Hass):
     def _pump_off(self):
         if not self._pump_is_on():
             return  # switch already off
+        if self._pump_stopping():
+            return  # stop already issued; relay is still settling
         self.call_service("script/turn_on", entity_id=PUMP_STOP_SCRIPT)
         now_str = self.datetime().strftime("%Y-%m-%d %H:%M:%S")
         self.call_service(
@@ -984,6 +1017,14 @@ class HeatOrchestrator(hass.Hass):
             return
 
         # --- 4. Pump is ON ---
+        if self._pump_stopping():
+            # wylacz_pompe was just called and the relay has not opened yet.
+            # Re-entering DHW_QUOTA/HEAT_* here would reset state_since and
+            # flap the FSM for one tick; just wait for the switch to read off.
+            self.log(f"[PUMP] stop pending (relay still on) state={current_state}")
+            self._update_diagnostics()
+            return
+
         if has_demand:
             # Determine active floor from current state
             if current_state == STATE_HEAT_GF:

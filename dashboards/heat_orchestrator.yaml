@@ -133,9 +133,11 @@ views:
             name: Pump power (W)
           - entity: input_text.pump_health
             name: Pump health (power check)
-          - entity: input_number.pump_on_minutes_today
+          - type: simple-entity
+            entity: input_number.pump_on_minutes_today
             name: Pump minutes today
-          - entity: input_number.pump_starts_today
+          - type: simple-entity
+            entity: input_number.pump_starts_today
             name: Pump starts today
           - entity: sensor.ho_dhw_quota_remaining
             name: DHW quota remaining
@@ -175,21 +177,29 @@ views:
       - type: entities
         title: Heating minutes today
         entities:
-          - entity: input_number.heating_minutes_gabinet_ani
+          - type: simple-entity
+            entity: input_number.heating_minutes_gabinet_ani
             name: Gabinet Ani
-          - entity: input_number.heating_minutes_lazienka_parter
+          - type: simple-entity
+            entity: input_number.heating_minutes_lazienka_parter
             name: Łazienka Parter
-          - entity: input_number.heating_minutes_salon
+          - type: simple-entity
+            entity: input_number.heating_minutes_salon
             name: Salon
-          - entity: input_number.heating_minutes_garaz
+          - type: simple-entity
+            entity: input_number.heating_minutes_garaz
             name: Garaż
-          - entity: input_number.heating_minutes_sypialnia
+          - type: simple-entity
+            entity: input_number.heating_minutes_sypialnia
             name: Sypialnia
-          - entity: input_number.heating_minutes_lazienka_pietro
+          - type: simple-entity
+            entity: input_number.heating_minutes_lazienka_pietro
             name: Łazienka Piętro
-          - entity: input_number.heating_minutes_pokoj_narozny
+          - type: simple-entity
+            entity: input_number.heating_minutes_pokoj_narozny
             name: Pokój narożny
-          - entity: input_number.heating_minutes_pokoj_z_garazem
+          - type: simple-entity
+            entity: input_number.heating_minutes_pokoj_z_garazem
             name: Pokój z garażem
   - title: Heating Timeline
     path: heating-timeline

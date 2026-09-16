@@ -10,24 +10,25 @@ This document describes changes introduced after the initial release and how to 
 
 **New feature:** Each room now has an `input_boolean.heating_<room_id>` entity that tracks whether the room is currently being heated (on) or idle (off). These entities are recorded in Home Assistant history, enabling you to plot heating periods per room on dashboard charts.
 
-**New entities (7):**
+**New entities (8):**
 
 | Entity ID | Description |
 |-----------|-------------|
 | `input_boolean.heating_gabinet_ani` | Heating status – Gabinet Ani |
 | `input_boolean.heating_lazienka_parter` | Heating status – Łazienka Parter |
 | `input_boolean.heating_salon` | Heating status – Salon |
+| `input_boolean.heating_garaz` | Heating status – Garaż |
 | `input_boolean.heating_sypialnia` | Heating status – Sypialnia |
 | `input_boolean.heating_lazienka_pietro` | Heating status – Łazienka Piętro |
-| `input_boolean.heating_pokoj_z_oknem_naroznym` | Heating status – Pokój z oknem narożnym |
-| `input_boolean.heating_pokoj_z_tarasem` | Heating status – Pokój z tarasem |
+| `input_boolean.heating_pokoj_narozny` | Heating status – Pokój narożny |
+| `input_boolean.heating_pokoj_z_garazem` | Heating status – Pokój z garażem |
 
 **Files modified:**
 
 | File | Change |
 |------|--------|
-| `packages/heat_orchestrator_helpers.yaml` | Added `input_boolean` section with 7 heating status entities |
-| `apps/heat_orchestrator/heat_orchestrator.py` | Added `HEATING_PREFIX` constant, `_set_heating_sensor()` method, calls in `_enable_room()` and `_disable_room()` |
+| `packages/heat_orchestrator_helpers.yaml` | Added `input_boolean` section with 8 heating status entities |
+| `apps/heat_orchestrator/heat_orchestrator.py` | Added per-room heating-status updates via `_set_heating_sensor()`, called from `_enable_room()` and `_disable_room()` |
 | `SETUP_GUIDE.md` | Added heating sensors to the dashboard card YAML |
 
 ### How to apply
@@ -40,7 +41,7 @@ Copy the updated `packages/heat_orchestrator_helpers.yaml` to your Home Assistan
 /config/packages/heat_orchestrator_helpers.yaml
 ```
 
-If you created helpers manually (Option B in the Setup Guide), create 7 new **Toggle** helpers via the UI instead:
+If you created helpers manually (Option B in the Setup Guide), create 8 new **Toggle** helpers via the UI instead:
 
 1. Go to **Settings → Devices & services → Helpers**
 2. Click **+ Create Helper → Toggle**
@@ -53,7 +54,7 @@ Go to **Settings → System → Restart** so the new `input_boolean` entities ar
 
 After restart, verify they exist:
 - Go to **Developer Tools → States**
-- Search for `input_boolean.heating_` — you should see all 7 entities
+- Search for `input_boolean.heating_` — you should see all 8 entities
 
 #### Step 3: Update the AppDaemon app
 
@@ -86,14 +87,16 @@ entities:
     name: Łazienka Parter
   - entity: input_boolean.heating_salon
     name: Salon
+  - entity: input_boolean.heating_garaz
+    name: Garaż
   - entity: input_boolean.heating_sypialnia
     name: Sypialnia
   - entity: input_boolean.heating_lazienka_pietro
     name: Łazienka Piętro
-  - entity: input_boolean.heating_pokoj_z_oknem_naroznym
-    name: Pokój z oknem narożnym
-  - entity: input_boolean.heating_pokoj_z_tarasem
-    name: Pokój z tarasem
+  - entity: input_boolean.heating_pokoj_narozny
+    name: Pokój narożny
+  - entity: input_boolean.heating_pokoj_z_garazem
+    name: Pokój z garażem
 ```
 
 Or use a **History Graph card** to visualize heating periods over time:
@@ -109,14 +112,16 @@ entities:
     name: Łazienka Parter
   - entity: input_boolean.heating_salon
     name: Salon
+  - entity: input_boolean.heating_garaz
+    name: Garaż
   - entity: input_boolean.heating_sypialnia
     name: Sypialnia
   - entity: input_boolean.heating_lazienka_pietro
     name: Łazienka Piętro
-  - entity: input_boolean.heating_pokoj_z_oknem_naroznym
-    name: Pokój z oknem narożnym
-  - entity: input_boolean.heating_pokoj_z_tarasem
-    name: Pokój z tarasem
+  - entity: input_boolean.heating_pokoj_narozny
+    name: Pokój narożny
+  - entity: input_boolean.heating_pokoj_z_garazem
+    name: Pokój z garażem
 ```
 
 ---

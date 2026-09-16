@@ -10,7 +10,7 @@ This system controls a heat pump powering underfloor heating across two manifold
 
 - **Floor exclusivity** — only one floor (GF or FF) heats at a time to respect hydraulic constraints
 - **Smart room selection** — prioritizes rooms by temperature deficit × user-defined priority
-- **Outdoor temperature modes** — adapts the number of simultaneously heated rooms based on outside temperature (bulk / limited / sequential)
+- **Outdoor-temperature room scaling** — linearly interpolates (LERP) the number of simultaneously heated rooms between a configured min and max as the outdoor temperature falls and rises
 - **User setpoint memory** — remembers manual thermostat adjustments even when rooms are temporarily disabled
 - **DHW quota** — ensures the pump runs a configurable minimum daily hours for hot water
 - **DHW duty-cycling** — when hot water is the only reason the pump runs (no room demand), quota runs are capped at a max duration and separated by a pause, spreading water heating across the day
@@ -36,7 +36,10 @@ This system controls a heat pump powering underfloor heating across two manifold
 │       ├── heat_orchestrator.py   # AppDaemon app (FSM + control logic)
 │       └── apps.yaml              # AppDaemon app registration
 ├── packages/
-│   └── heat_orchestrator_helpers.yaml  # HA helpers (56 entities)
+│   ├── heat_orchestrator_helpers.yaml           # HA helpers (61 entities)
+│   └── heat_orchestrator_dashboard_sensors.yaml # Template sensors for graphs
+├── dashboards/
+│   └── heat_orchestrator.yaml     # Lovelace dashboard (control + diagnostics + graphs)
 ├── home-assistant-heat-orchestrator-spec.md  # Full specification
 ├── SETUP_GUIDE.md                 # Detailed step-by-step setup
 └── README.md
@@ -59,8 +62,7 @@ This system controls a heat pump powering underfloor heating across two manifold
 **Pump**
 - ON: `script.uruchom_pompe`
 - OFF: `script.wylacz_pompe` (graceful shutdown)
-- State: `switch.zasilanie_pompy_sonoff_10017fadeb_1` (authoritative on/off)
-- Health: `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (power cross-check, diagnostic only)
+- Run-state: the relay switch `switch.zasilanie_pompy_sonoff_10017fadeb_1` — the `uruchom`/`wylacz` scripts toggle it, so it reflects the commanded on/off state instantly. The power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` is used **only** as a health cross-check: if the pump is commanded on but draws < 50 W for several minutes, it's flagged `NO_FLOW` (`input_text.pump_health`).
 
 **Weather**
 - `weather.forecast_home` (Met.no)
@@ -134,9 +136,9 @@ INFO heat_orchestrator: === HeatOrchestrator ready ===
 | DHW min daily hours | 3.5 h | `input_number.dhw_min_run_hours` |
 | DHW exclusive max duration | 45 min | `input_number.dhw_exclusive_max_run_min` |
 | DHW exclusive pause duration | 90 min | `input_number.dhw_exclusive_pause_min` |
-| Bulk mode threshold | +5°C | `input_number.bulk_mode_temp` |
-| Sequential mode threshold | -5°C | `input_number.sequential_mode_temp` |
-| Max rooms (limited mode) | 2 | `input_number.max_rooms_limited` |
+| Bulk mode threshold (legacy, unused) | +5°C | `input_number.bulk_mode_temp` |
+| Sequential mode threshold (legacy, unused) | -5°C | `input_number.sequential_mode_temp` |
+| Max rooms, limited mode (legacy, unused) | 2 | `input_number.max_rooms_limited` |
 | Max continuous heating time | 120 min | `input_number.max_continuous_heating_min` |
 | LERP temp min (1 room) | -10°C | `input_number.lerp_temp_min` |
 | LERP temp max (max rooms) | +10°C | `input_number.lerp_temp_max` |
@@ -152,7 +154,7 @@ Every 60 seconds the orchestrator runs a tick cycle:
 2. **Compute demand** — for each room, check if current temperature is below user setpoint minus hysteresis
 3. **Score floors** — `floor_score = max(deficit × priority)` across all rooms with demand
 4. **Select floor** — pick the highest-scoring floor (won't switch before `min_state_duration` elapses)
-5. **Select rooms** — based on outdoor temperature: all demanding rooms (bulk), top N (limited), or top 1 (sequential)
+5. **Select rooms** — sort demanding rooms by priority then deficit, then take the top *N*, where *N* is LERP-derived from the current outdoor temperature (clamped to the floor's room count)
 6. **Control thermostats** — enable selected rooms (restore user setpoint), disable others (set to 7°C)
 7. **Control pump** — turn on/off respecting min on/off timers and cooldown periods
 8. **DHW quota** — if no heating demand but daily quota unmet, keep pump running with all rooms disabled. With duty-cycling enabled (both `dhw_exclusive_*` helpers > 0), each DHW-only run is capped at `dhw_exclusive_max_run_min` and the next one starts only after `dhw_exclusive_pause_min` has elapsed since the pump stopped, spreading the quota across the day instead of one continuous morning block. Room-demand starts are never delayed by the pause; `min_pump_on`/`min_pump_off` always take precedence. Setting either helper to 0 restores the legacy continuous behavior.

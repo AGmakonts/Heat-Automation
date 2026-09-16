@@ -80,6 +80,8 @@ Then create global helpers:
 | Number | `min_pump_on_min` | 5–120 | 5 | 40 | min |
 | Number | `min_pump_off_min` | 5–120 | 5 | 25 | min |
 | Number | `dhw_min_run_hours` | 0–12 | 0.5 | 3.5 | h |
+| Number | `dhw_exclusive_max_run_min` | 0–240 | 5 | 45 | min |
+| Number | `dhw_exclusive_pause_min` | 0–360 | 5 | 90 | min |
 | Number | `pump_on_minutes_today` | 0–1440 | 1 | 0 | min |
 | Number | `pump_starts_today` | 0–100 | 1 | 0 | – |
 | Number | `bulk_mode_temp` ⚠️ | -20–20 | 1 | 5 | °C |
@@ -230,6 +232,8 @@ All parameters are adjustable live via the UI without restarting anything:
 | `input_number.min_pump_on_min` | Min pump run before allowing shutdown | Helpers page |
 | `input_number.min_pump_off_min` | Cooldown period after pump stops | Helpers page |
 | `input_number.dhw_min_run_hours` | Daily pump quota for hot water | Helpers page |
+| `input_number.dhw_exclusive_max_run_min` | Max continuous DHW-only run (no room demand); 0 = continuous | Helpers page |
+| `input_number.dhw_exclusive_pause_min` | Pause between DHW-only runs; 0 = continuous | Helpers page |
 | `input_number.lerp_temp_min` | Outdoor temp at/below which the room count is clamped to `lerp_rooms_min` | Helpers page |
 | `input_number.lerp_temp_max` | Outdoor temp at/above which the room count reaches `lerp_rooms_max` | Helpers page |
 | `input_number.lerp_rooms_min` | Fewest rooms heated at once (cold end of the LERP) | Helpers page |
@@ -293,6 +297,8 @@ entities:
   - entity: input_number.min_pump_on_min
   - entity: input_number.min_pump_off_min
   - entity: input_number.dhw_min_run_hours
+  - entity: input_number.dhw_exclusive_max_run_min
+  - entity: input_number.dhw_exclusive_pause_min
   - entity: input_number.lerp_temp_min
   - entity: input_number.lerp_temp_max
   - entity: input_number.lerp_rooms_min

@@ -64,6 +64,22 @@ input_number:
     step: 1
     icon: mdi:priority-high
 
+  # --- Garaż ---
+  user_sp_garaz:
+    name: "User SP – Garaż"
+    min: 5
+    max: 30
+    step: 0.5
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer
+
+  priority_garaz:
+    name: "Priority – Garaż"
+    min: 1
+    max: 100
+    step: 1
+    icon: mdi:priority-high
+
   # --- Sypialnia ---
   user_sp_sypialnia:
     name: "User SP – Sypialnia"
@@ -91,22 +107,6 @@ input_number:
 
   priority_lazienka_pietro:
     name: "Priority – Łazienka Piętro"
-    min: 1
-    max: 100
-    step: 1
-    icon: mdi:priority-high
-
-  # --- Garaż ---
-  user_sp_garaz:
-    name: "User SP – Garaż"
-    min: 5
-    max: 30
-    step: 0.5
-    unit_of_measurement: "°C"
-    icon: mdi:thermometer
-
-  priority_garaz:
-    name: "Priority – Garaż"
     min: 1
     max: 100
     step: 1
@@ -222,6 +222,31 @@ input_number:
     unit_of_measurement: "min"
     icon: mdi:counter
 
+  # Max continuous pump run when DHW quota is the ONLY reason the pump is on
+  # (no room demand). 0 disables duty-cycling (single continuous quota run).
+  # min_pump_on takes precedence: effective max run is
+  # max(dhw_exclusive_max_run_min, min_pump_on_min).
+  dhw_exclusive_max_run_min:
+    name: "DHW Quota Exclusive Max Duration"
+    min: 0
+    max: 240
+    step: 5
+    initial: 45
+    unit_of_measurement: "min"
+    icon: mdi:timer-sand
+
+  # Pause between DHW-only runs. 0 disables duty-cycling. Room-demand starts
+  # are never delayed by this pause; effective pause before a DHW-only start
+  # is max(dhw_exclusive_pause_min, min_pump_off_min).
+  dhw_exclusive_pause_min:
+    name: "DHW Quota Exclusive Pause Duration"
+    min: 0
+    max: 360
+    step: 5
+    initial: 90
+    unit_of_measurement: "min"
+    icon: mdi:timer-pause
+
   # ---------------------------------------------------------------------------
   # Temperature mode thresholds
   # ---------------------------------------------------------------------------
@@ -275,15 +300,6 @@ input_number:
     unit_of_measurement: "min"
     icon: mdi:timer-sand
 
-  heating_minutes_garaz:
-    name: "Heating Minutes – Garaż"
-    min: 0
-    max: 1440
-    step: 1
-    initial: 0
-    unit_of_measurement: "min"
-    icon: mdi:timer-sand
-
   heating_minutes_lazienka_parter:
     name: "Heating Minutes – Łazienka Parter"
     min: 0
@@ -295,6 +311,15 @@ input_number:
 
   heating_minutes_salon:
     name: "Heating Minutes – Salon"
+    min: 0
+    max: 1440
+    step: 1
+    initial: 0
+    unit_of_measurement: "min"
+    icon: mdi:timer-sand
+
+  heating_minutes_garaz:
+    name: "Heating Minutes – Garaż"
     min: 0
     max: 1440
     step: 1
@@ -434,16 +459,16 @@ input_boolean:
     name: "Heating – Gabinet Ani"
     icon: mdi:radiator
 
-  heating_garaz:
-    name: "Heating – Garaż"
-    icon: mdi:radiator
-
   heating_lazienka_parter:
     name: "Heating – Łazienka Parter"
     icon: mdi:radiator
 
   heating_salon:
     name: "Heating – Salon"
+    icon: mdi:radiator
+
+  heating_garaz:
+    name: "Heating – Garaż"
     icon: mdi:radiator
 
   heating_sypialnia:
@@ -486,6 +511,6 @@ input_text:
 
   pump_health:
     name: "Pump Health"
-    initial: "OFF"
+    initial: "UNKNOWN"
     max: 20
     icon: mdi:heart-pulse

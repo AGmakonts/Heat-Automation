@@ -70,8 +70,10 @@ ALL_ROOMS = list(ROOMS)
 # Pump control
 # ---------------------------------------------------------------------------
 # On/off are HA scripts (uruchom/wylacz) which toggle the Sonoff relay. The
-# relay switch flips instantly with the command, so it is the authoritative
-# "is the pump on" signal (PUMP_SWITCH). The Sonoff also meters power, used
+# relay switch follows the command within a tick or so (production logs show
+# it can still read "on" one tick after wylacz — see PUMP_STOP_SETTLE_MIN),
+# so it is the authoritative "is the pump on" signal (PUMP_SWITCH). The Sonoff
+# also meters power, used
 # ONLY as a health cross-check: if the pump is commanded ON (switch on) but
 # draws almost nothing for a while, it likely is not actually running.
 # (Idle/circulation ~100 W; compressor running >1000 W; truly off/dead ~0 W.)
@@ -81,6 +83,7 @@ PUMP_SWITCH = "switch.zasilanie_pompy_sonoff_10017fadeb_1"
 PUMP_POWER_SENSOR = "sensor.zasilanie_pompy_sonoff_10017fadeb_power"
 PUMP_HEALTH_MIN_WATTS = 50.0   # below this while commanded ON = suspicious
 PUMP_HEALTH_GRACE_MIN = 5.0    # ignore the first minutes after a start (spin-up)
+PUMP_STOP_SETTLE_MIN = 3.0     # after wylacz the relay may still read "on" for a tick or two
 
 WEATHER_ENTITY = "weather.forecast_home"
 
@@ -219,6 +222,21 @@ class HeatOrchestrator(hass.Hass):
         """
         return self.get_state(PUMP_SWITCH) == "on"
 
+    def _pump_stopping(self) -> bool:
+        """True while a stop command is settling: wylacz_pompe was called less
+        than PUMP_STOP_SETTLE_MIN ago, no start was issued since, but the relay
+        still reads "on". Without this the tick after a stop sees "pump on"
+        and re-enters DHW_QUOTA/HEAT_* (resetting state_since) or re-fires the
+        stop script and re-stamps last_pump_off.
+        """
+        if not self._pump_is_on():
+            return False
+        mins_off = self._minutes_since("input_datetime.last_pump_off")
+        if mins_off is None or mins_off >= PUMP_STOP_SETTLE_MIN:
+            return False
+        mins_on = self._minutes_since("input_datetime.last_pump_on")
+        return mins_on is None or mins_on > mins_off
+
     def _get_fsm_state(self) -> str:
         val = self.get_state("input_text.heat_state")
         if val in (STATE_OFF_LOCKOUT, STATE_OFF, STATE_HEAT_GF, STATE_HEAT_FF, STATE_DHW_QUOTA):
@@ -287,6 +305,21 @@ class HeatOrchestrator(hass.Hass):
     @property
     def dhw_min_run_hours(self) -> float:
         return self._param("input_number.dhw_min_run_hours", 3.5)
+
+    @property
+    def dhw_exclusive_max_run(self) -> float:
+        """Max continuous DHW-only run [min]; 0 disables duty-cycling."""
+        return self._param("input_number.dhw_exclusive_max_run_min", 45.0)
+
+    @property
+    def dhw_exclusive_pause(self) -> float:
+        """Pause between DHW-only runs [min]; 0 disables duty-cycling."""
+        return self._param("input_number.dhw_exclusive_pause_min", 90.0)
+
+    def _dhw_duty_cycle_enabled(self) -> bool:
+        """Duty-cycling of DHW-only runs is active only when both the max run
+        and the pause are configured to non-zero values."""
+        return self.dhw_exclusive_max_run > 0 and self.dhw_exclusive_pause > 0
 
     @property
     def bulk_mode_temp(self) -> float:
@@ -379,19 +412,19 @@ class HeatOrchestrator(hass.Hass):
         t_max = self._param("input_number.lerp_temp_max", 10.0)
         r_min = max(1, int(self._param("input_number.lerp_rooms_min", 1.0)))
         r_max = max(1, int(self._param("input_number.lerp_rooms_max", 5.0)))
-        
+
         # Ensure r_max >= r_min to avoid counterintuitive behavior
         if r_max < r_min:
             r_min, r_max = r_max, r_min
-        
+
         if t_min >= t_max:
             return r_min  # safety: degenerate config
-        
+
         if t_out <= t_min:
             return r_min
         if t_out >= t_max:
             return r_max
-        
+
         # Linear interpolation
         frac = (t_out - t_min) / (t_max - t_min)
         result = r_min + frac * (r_max - r_min)
@@ -400,13 +433,21 @@ class HeatOrchestrator(hass.Hass):
     # -----------------------------------------------------------------------
     # Demand model
     # -----------------------------------------------------------------------
+    def _is_unmanaged(self, room: str) -> bool:
+        """Room was marked unmanaged after failed commands; the mark expires
+        after 15 minutes (and is cleared here when it does)."""
+        marked = self.unmanaged_rooms.get(room)
+        if marked is None:
+            return False
+        if self.datetime() - marked < datetime.timedelta(minutes=15):
+            return True
+        del self.unmanaged_rooms[room]
+        return False
+
     def _need_heat(self, room: str) -> bool:
         """Room needs heating: Tcur < Tuser - hyst_on."""
-        if room in self.unmanaged_rooms:
-            if self.datetime() - self.unmanaged_rooms[room] < datetime.timedelta(minutes=15):
-                return False
-            else:
-                del self.unmanaged_rooms[room]
+        if self._is_unmanaged(room):
+            return False
 
         t_cur = self._get_climate_current_temp(room)
         t_user = self._get_number(ROOMS[room].user_sp)
@@ -428,17 +469,14 @@ class HeatOrchestrator(hass.Hass):
 
     def _has_demand(self, room: str) -> bool:
         """Hysteresis-aware demand check.
-        
+
         For rooms already heating: keep heating until satisfied (offset threshold).
         For rooms not heating: only start if need_heat (onset threshold).
         This creates the proper two-threshold hysteresis band.
         """
         # Respect unmanaged room timeout
-        if room in self.unmanaged_rooms:
-            if self.datetime() - self.unmanaged_rooms[room] < datetime.timedelta(minutes=15):
-                return False
-            else:
-                del self.unmanaged_rooms[room]
+        if self._is_unmanaged(room):
+            return False
 
         if self._is_room_heating(room):
             # Currently heating → keep going until satisfied (offset threshold)
@@ -490,6 +528,9 @@ class HeatOrchestrator(hass.Hass):
 
     def _reset_heating_minutes(self, room: str):
         """Reset accumulated heating minutes for a room to zero."""
+        current = self._get_number(ROOMS[room].heating_minutes)
+        if current is not None and current == 0:
+            return  # already zero — skip the service call (called every tick)
         self._set_heating_minutes(room, 0)
 
     def _enable_room(self, room: str):
@@ -540,6 +581,14 @@ class HeatOrchestrator(hass.Hass):
         if current_sp is not None and abs(current_sp - off_sp) < 0.05:
             self._set_heating_sensor(room, False)
             return  # already at off setpoint
+        if current_sp is None:
+            # TRV unavailable (no setpoint attribute). This runs every tick in
+            # steady OFF, so don't hammer an offline device; it is re-parked
+            # on the first tick after it comes back.
+            self._set_heating_sensor(room, False)
+            return
+        if self._is_unmanaged(room):
+            return  # recent command failures; retried after the 15 min timeout
 
         self.automation_guard[room] = True
         try:
@@ -634,6 +683,24 @@ class HeatOrchestrator(hass.Hass):
             f"(thermostat shown: {new_val}°C)"
         )
 
+        # Log the resulting demand evaluation right away, so a "nothing
+        # happened" outcome is explainable from the log alone (hysteresis
+        # vs missing temperature reading).
+        t_cur = self._get_climate_current_temp(room)
+        if t_cur is None:
+            self.log(
+                f"[USER] {room} current_temperature unavailable — "
+                f"demand cannot be evaluated",
+                level="WARNING",
+            )
+        else:
+            threshold = stored_val - self.hyst_on
+            verdict = "demand" if t_cur < threshold else "no demand (hysteresis)"
+            self.log(
+                f"[USER] {room} demand check: t_cur={t_cur}°C "
+                f"threshold={threshold:.1f}°C → {verdict}"
+            )
+
     def _on_weather_change(self, entity, attribute, old, new, **kwargs):
         pass  # Tick handles weather; this is placeholder for potential future use
 
@@ -658,6 +725,8 @@ class HeatOrchestrator(hass.Hass):
     def _pump_off(self):
         if not self._pump_is_on():
             return  # switch already off
+        if self._pump_stopping():
+            return  # stop already issued; relay is still settling
         self.call_service("script/turn_on", entity_id=PUMP_STOP_SCRIPT)
         now_str = self.datetime().strftime("%Y-%m-%d %H:%M:%S")
         self.call_service(
@@ -736,24 +805,24 @@ class HeatOrchestrator(hass.Hass):
 
     def _build_candidates(self, floor: str, apply_side_effects: bool = True) -> list[str]:
         """Build list of rooms with demand that are eligible (not in cooldown).
-        
+
         Args:
             floor: "GF" or "FF"
             apply_side_effects: If True, applies cooldown when rooms exceed max time.
                                If False, only checks eligibility without side effects.
-        
+
         Returns:
             List of eligible rooms (not sorted, not LERP-limited).
         """
         rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
         now = self.datetime()
-        
+
         candidates = []
         for room in rooms:
             # Check if room needs heat
             if not self._has_demand(room):
                 continue
-            
+
             # Check if room has exceeded max continuous heating time
             heating_min = self._get_heating_minutes(room)
             if heating_min >= self.max_continuous_heating_min:
@@ -765,19 +834,19 @@ class HeatOrchestrator(hass.Hass):
                     self.log(f"[ROOM] {room} forced cooldown after {heating_min:.0f}min continuous heating")
                 # Always exclude rooms that exceeded max heating time
                 continue
-            
+
             # Check if room is in cooldown
             if self._is_room_in_cooldown(room, now):
                 continue
-            
+
             # Room is eligible
             candidates.append(room)
-        
+
         return candidates
 
     def _has_selectable_rooms(self, floor: str) -> bool:
         """Check if a floor has any rooms with demand that are NOT in cooldown.
-        
+
         This is a pure predicate check without side effects - does not trigger
         cooldown enforcement or logging. Used for floor-switching decisions.
         """
@@ -785,11 +854,11 @@ class HeatOrchestrator(hass.Hass):
 
     def _select_rooms(self, floor: str) -> list[str]:
         """Select rooms to heat on the given floor.
-        
+
         Returns sorted list of rooms, limited by LERP-based outdoor temperature calculation.
         """
         candidates = self._build_candidates(floor)
-        
+
         if not candidates:
             return []
 
@@ -806,15 +875,15 @@ class HeatOrchestrator(hass.Hass):
         # Use LERP to determine max rooms
         t_out = self._get_outdoor_temp()
         max_rooms_lerp = self._lerp_max_rooms(t_out)
-        
+
         # Clamp to floor room count
         rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
         max_rooms_for_floor = len(rooms)
         max_rooms = min(max_rooms_lerp, max_rooms_for_floor)
-        
+
         # Clamp to candidate count
         max_rooms = min(max_rooms, len(candidates))
-        
+
         return candidates[:max_rooms]
 
     # -----------------------------------------------------------------------
@@ -823,12 +892,12 @@ class HeatOrchestrator(hass.Hass):
     def _daily_reset(self, **kwargs):
         self._set_number("input_number.pump_on_minutes_today", 0)
         self._set_number("input_number.pump_starts_today", 0)
-        
+
         # Clear all cooldown states and heating minute counters
         for room in ALL_ROOMS:
             self.room_cooldown_until[room] = None
             self._reset_heating_minutes(room)
-        
+
         self.log("[RESET] Daily counters zeroed, cooldown states and heating minutes cleared")
 
     # -----------------------------------------------------------------------
@@ -873,8 +942,12 @@ class HeatOrchestrator(hass.Hass):
             else:
                 if current_state != STATE_OFF_LOCKOUT:
                     self._set_fsm_state(STATE_OFF_LOCKOUT)
-                    self._disable_all_rooms()
                     self.log(f"[DECISION] state=OFF_LOCKOUT reason=off_window")
+                # Idempotent re-park: a manual setpoint change while parked is
+                # recorded in user_sp by the listener, but must not linger on
+                # the TRV (open valve, misleading display) until the next
+                # state transition.
+                self._disable_all_rooms()
             return
 
         # --- 2. Compute demand and quota ---
@@ -894,6 +967,14 @@ class HeatOrchestrator(hass.Hass):
             mins_off = self._minutes_since("input_datetime.last_pump_off")
             cooldown_ok = mins_off is None or mins_off >= self.min_pump_off
 
+            # DHW-only starts additionally honor the exclusive pause, so the
+            # daily quota gets spread across the day instead of running as one
+            # continuous block. Room-demand starts are never delayed by this.
+            dhw_pause_ok = True
+            if self._dhw_duty_cycle_enabled():
+                required_pause = max(self.min_pump_off, self.dhw_exclusive_pause)
+                dhw_pause_ok = mins_off is None or mins_off >= required_pause
+
             if has_demand and cooldown_ok:
                 # Pick floor
                 floor = "GF" if score_gf >= score_ff else "FF"
@@ -906,7 +987,7 @@ class HeatOrchestrator(hass.Hass):
                     f"floor={floor} GF_score={score_gf:.1f} FF_score={score_ff:.1f} "
                     f"Tout={t_out:.1f} quota_remaining={remaining_quota:.0f}"
                 )
-            elif remaining_quota > 0 and cooldown_ok:
+            elif remaining_quota > 0 and cooldown_ok and dhw_pause_ok:
                 # DHW quota mode
                 self._disable_all_rooms()
                 self._pump_on()
@@ -918,11 +999,17 @@ class HeatOrchestrator(hass.Hass):
             else:
                 if current_state != STATE_OFF:
                     self._set_fsm_state(STATE_OFF)
-                    self._disable_all_rooms()
+                # Idempotent re-park (see OFF_LOCKOUT): keeps TRVs at the off
+                # setpoint while the state is steady OFF, so a manual setpoint
+                # change that produced no demand does not stay on the TRV.
+                self._disable_all_rooms()
                 if self._tick_counter % self._log_every_n_ticks == 0:
                     reason = "no_demand_no_quota"
                     if not cooldown_ok:
                         reason = f"pump_cooldown ({mins_off:.0f}/{self.min_pump_off:.0f})"
+                    elif remaining_quota > 0 and not dhw_pause_ok:
+                        required_pause = max(self.min_pump_off, self.dhw_exclusive_pause)
+                        reason = f"dhw_exclusive_pause ({mins_off:.0f}/{required_pause:.0f})"
                     self.log(
                         f"[DECISION] state=OFF reason={reason} "
                         f"Tout={t_out:.1f} quota_remaining={remaining_quota:.0f}"
@@ -930,6 +1017,14 @@ class HeatOrchestrator(hass.Hass):
             return
 
         # --- 4. Pump is ON ---
+        if self._pump_stopping():
+            # wylacz_pompe was just called and the relay has not opened yet.
+            # Re-entering DHW_QUOTA/HEAT_* here would reset state_since and
+            # flap the FSM for one tick; just wait for the switch to read off.
+            self.log(f"[PUMP] stop pending (relay still on) state={current_state}")
+            self._update_diagnostics()
+            return
+
         if has_demand:
             # Determine active floor from current state
             if current_state == STATE_HEAT_GF:
@@ -992,6 +1087,36 @@ class HeatOrchestrator(hass.Hass):
                     f"[DECISION] state=DHW_QUOTA reason=quota "
                     f"quota_remaining={remaining_quota:.0f}"
                 )
+            elif self._dhw_duty_cycle_enabled():
+                # DHW quota is the only reason the pump is running. Limit the
+                # continuous run so the quota gets spread across the day;
+                # the pause before the next run is enforced at pump start.
+                # state_since is set on every entry into DHW_QUOTA, so it
+                # measures exclusive-run time only.
+                state_since = self._get_state_since()
+                if state_since is not None:
+                    elapsed = (now - state_since).total_seconds() / 60.0
+                    if elapsed >= self.dhw_exclusive_max_run:
+                        mins_on = self._minutes_since("input_datetime.last_pump_on")
+                        if mins_on is not None and mins_on >= self.min_pump_on:
+                            self._pump_off()
+                            self._set_fsm_state(STATE_OFF)
+                            self.log(
+                                f"[DECISION] state=OFF reason=dhw_exclusive_max_run "
+                                f"({elapsed:.0f}/{self.dhw_exclusive_max_run:.0f} min) "
+                                f"pause={max(self.min_pump_off, self.dhw_exclusive_pause):.0f} min "
+                                f"quota_remaining={remaining_quota:.0f}"
+                            )
+                        else:
+                            # Compressor protection wins: effective max run is
+                            # max(dhw_exclusive_max_run, min_pump_on).
+                            if self._tick_counter % self._log_every_n_ticks == 0:
+                                mins_on_str = f"{mins_on:.0f}" if mins_on is not None else "unknown"
+                                self.log(
+                                    f"[DECISION] state=DHW_QUOTA exclusive max run reached "
+                                    f"but waiting for min_pump_on "
+                                    f"({mins_on_str}/{self.min_pump_on:.0f} min)"
+                                )
 
         else:
             # No demand, no quota → pump off

@@ -15,7 +15,8 @@
 #
 # Names are intentionally ASCII so the auto-generated entity IDs are
 # deterministic: sensor.ho_temp_<room>, sensor.ho_target_<room>,
-# sensor.ho_delta_<room>, sensor.ho_dhw_quota_remaining. Friendly (Polish)
+# sensor.ho_delta_<room>, sensor.ho_dhw_quota_remaining,
+# sensor.ho_outdoor_temp, sensor.ho_avg_room_temp. Friendly (Polish)
 # labels are applied in the dashboard, not here.
 # =============================================================================
 template:
@@ -69,6 +70,27 @@ template:
         device_class: temperature
         availability: "{{ state_attr('climate.pokoj_z_garazem','current_temperature') is not none }}"
         state: "{{ state_attr('climate.pokoj_z_garazem','current_temperature') }}"
+
+      # ===== Average of all room temperatures =====
+      # Averages the ho_temp_* sensors above; rooms whose sensor is
+      # unavailable are skipped rather than dragging the value down.
+      - name: "HO Avg Room Temp"
+        unique_id: ho_avg_room_temp
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: >
+          {{ expand('sensor.ho_temp_gabinet_ani', 'sensor.ho_temp_lazienka_parter',
+                    'sensor.ho_temp_salon', 'sensor.ho_temp_garaz',
+                    'sensor.ho_temp_sypialnia', 'sensor.ho_temp_lazienka_pietro',
+                    'sensor.ho_temp_pokoj_narozny', 'sensor.ho_temp_pokoj_z_garazem')
+             | selectattr('state', 'is_number') | list | count > 0 }}
+        state: >
+          {{ expand('sensor.ho_temp_gabinet_ani', 'sensor.ho_temp_lazienka_parter',
+                    'sensor.ho_temp_salon', 'sensor.ho_temp_garaz',
+                    'sensor.ho_temp_sypialnia', 'sensor.ho_temp_lazienka_pietro',
+                    'sensor.ho_temp_pokoj_narozny', 'sensor.ho_temp_pokoj_z_garazem')
+             | selectattr('state', 'is_number') | map(attribute='state')
+             | map('float') | average | round(2) }}
 
       # ===== Thermostat set temperature (climate target temperature) =====
       - name: "HO Target Gabinet Ani"
@@ -193,6 +215,15 @@ template:
         state: >
           {{ (state_attr('climate.pokoj_z_garazem','current_temperature')
               - states('input_number.user_sp_pokoj_z_garazem')|float) | round(2) }}
+
+      # ===== Outdoor temperature (weather entity attribute) =====
+      # Same source the orchestrator's _get_outdoor_temp() reads first.
+      - name: "HO Outdoor Temp"
+        unique_id: ho_outdoor_temp
+        unit_of_measurement: "°C"
+        device_class: temperature
+        availability: "{{ state_attr('weather.forecast_home','temperature') is not none }}"
+        state: "{{ state_attr('weather.forecast_home','temperature') }}"
 
       # ===== Remaining DHW quota for today =====
       - name: "HO DHW Quota Remaining"

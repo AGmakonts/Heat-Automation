@@ -91,6 +91,8 @@ views:
       - type: entities
         title: Room scaling (LERP by outdoor temp)
         entities:
+          - entity: sensor.ho_outdoor_temp
+            name: Current outdoor temp
           - entity: input_number.lerp_temp_min
             name: Temp min (→ fewest rooms)
           - entity: input_number.lerp_temp_max
@@ -209,6 +211,10 @@ views:
         title: Current temperatures — all rooms
         hours_to_show: 24
         entities:
+          - entity: sensor.ho_outdoor_temp
+            name: Zewnątrz
+          - entity: sensor.ho_avg_room_temp
+            name: Średnia
           - entity: sensor.ho_temp_gabinet_ani
             name: Gabinet Ani
           - entity: sensor.ho_temp_lazienka_parter

@@ -5,25 +5,25 @@
 - Home Assistant instance running (HAOS, Docker, or Core)
 - AppDaemon 4.x add-on / installation
 - The following integrations already configured:
-  - Climate entities for all thermostats (`climate.gabinet_ani`, `climate.lazienka_parter`, `climate.salon`, `climate.sypialnia`, `climate.lazienka_pietro`, `climate.pokoj_z_oknem_naroznym`, `climate.pokoj_z_tarasem`)
-  - Pump switch: `switch.sonoff_10017fadeb`
-  - Pump OFF button: `input_button.wylacznik_pompy` (must exist before starting)
+  - Climate entities for all thermostats (`climate.gabinet_ani`, `climate.lazienka_parter`, `climate.salon`, `climate.garaz`, `climate.sypialnia`, `climate.lazienka_pietro`, `climate.pokoj_narozny`, `climate.pokoj_z_garazem`)
+  - Pump ON script: `script.uruchom_pompe`
+  - Pump OFF script: `script.wylacz_pompe` (graceful shutdown; must exist before starting)
+  - Pump relay / run-state switch: `switch.zasilanie_pompy_sonoff_10017fadeb_1` — the `uruchom`/`wylacz` scripts toggle it; the orchestrator reads it as the authoritative pump on/off state
+  - Pump power meter: `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W) — used only as a health cross-check (commanded on but no draw → pump not running)
   - Weather: `weather.forecast_home` (Met.no integration)
 
 ---
 
-## Step 1: Create the Input Button (if it doesn't exist)
+## Step 1: Create the Pump Scripts (if they don't exist)
 
-If `input_button.wylacznik_pompy` doesn't already exist, create it:
+The orchestrator turns the pump ON via `script.uruchom_pompe` and OFF via `script.wylacz_pompe`. Create them if they don't already exist:
 
-1. Go to **Settings → Devices & services → Helpers**
-2. Click **+ Create Helper**
-3. Choose **Button**
-4. Name: `Wyłącznik Pompy`
-5. Entity ID will be `input_button.wylacznik_pompy`
-6. Click **Create**
+1. Go to **Settings → Automations & scenes → Scripts**
+2. Click **+ Add Script**
+3. Create `script.uruchom_pompe` — the start sequence for the pump
+4. Create `script.wylacz_pompe` — the graceful shutdown sequence for the pump
 
-> **Note:** This button should trigger an automation or script that performs the pump's graceful shutdown sequence.
+> **Important:** `script.uruchom_pompe` / `script.wylacz_pompe` must toggle the Sonoff relay `switch.zasilanie_pompy_sonoff_10017fadeb_1` — the orchestrator reads **that switch** as the authoritative pump on/off state. The power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` is used only as a health cross-check: if the pump is commanded on but draws < 50 W for ~5 min, the app logs a warning and sets `input_text.pump_health` to `NO_FLOW`.
 
 ---
 
@@ -62,10 +62,12 @@ If you prefer not to use packages, create each helper manually through the UI:
 
 **Settings → Devices & services → Helpers → + Create Helper**
 
-For each room (`gabinet_ani`, `lazienka_parter`, `salon`, `sypialnia`, `lazienka_pietro`, `pokoj_z_oknem_naroznym`, `pokoj_z_tarasem`):
+For each room (`gabinet_ani`, `lazienka_parter`, `salon`, `garaz`, `sypialnia`, `lazienka_pietro`, `pokoj_narozny`, `pokoj_z_garazem`):
 
 1. **Number** – `user_sp_<room_id>` (range 5–30, step 0.5, unit °C)
 2. **Number** – `priority_<room_id>` (range 1–100, step 1)
+3. **Toggle** – `heating_<room_id>` (heating status)
+4. **Number** – `heating_minutes_<room_id>` (range 0–1440, step 1, unit min)
 
 Then create global helpers:
 
@@ -89,8 +91,6 @@ Then create global helpers:
 | Number | `lerp_rooms_min` ✅ | 1–3 | 1 | 1 | – |
 | Number | `lerp_rooms_max` ✅ | 1–7 | 1 | 5 | – |
 | DateTime (time only) | `off_window_start` | – | – | 01:00 | – |
-
-> **Note:** Helpers marked with ⚠️ (`bulk_mode_temp`, `sequential_mode_temp`, `max_rooms_limited`) are retained for backward compatibility but are **not actively used** for room selection. The system now uses LERP-based helpers (marked with ✅) to determine how many rooms to heat based on outdoor temperature.
 | DateTime (time only) | `off_window_end` | – | – | 06:00 | – |
 | DateTime (time only) | `day_reset_time` | – | – | 00:00 | – |
 | DateTime (date+time) | `state_since` | – | – | – | – |
@@ -99,6 +99,8 @@ Then create global helpers:
 | Text | `heat_state` | – | – | OFF | – |
 | Text | `active_floor` | – | – | none | – |
 | Text | `active_rooms` | – | – | (empty) | – |
+
+> **Note:** Helpers marked with ⚠️ (`bulk_mode_temp`, `sequential_mode_temp`, `max_rooms_limited`) are retained for backward compatibility but are **not actively used** for room selection. The system now uses the LERP-based helpers (marked with ✅) to determine how many rooms to heat based on outdoor temperature.
 
 ---
 
@@ -173,7 +175,7 @@ Follow the [official AppDaemon installation docs](https://appdaemon.readthedocs.
        └── apps.yaml
    ```
 
-   > **Important:** Place both files directly in the `apps/` folder — do **not** put them inside a `heat_orchestrator/` subdirectory. AppDaemon would treat the directory name as a Python package and fail to find the class.
+   > **Note:** AppDaemon recursively scans every subdirectory of `apps/` and adds them to the import path, so the app loads whether the two files sit directly in `apps/` **or** in an `apps/heat_orchestrator/` subfolder — `module: heat_orchestrator` resolves either way. A subdirectory becomes a Python *package* (which would require the dotted `module: heat_orchestrator.heat_orchestrator`) **only** if you add an `__init__.py` to it, so don't add one. Also avoid two app modules with the same filename in different subfolders (AppDaemon's choice between duplicates is undefined).
 
 ---
 
@@ -186,7 +188,7 @@ Follow the [official AppDaemon installation docs](https://appdaemon.readthedocs.
    apps/heat_orchestrator/apps.yaml             →  <appdaemon_config>/apps/apps.yaml
    ```
 
-   > **Note:** The files in this repo are under `apps/heat_orchestrator/` for organisation, but on AppDaemon they must sit directly in `apps/`.
+   > **Note:** The files in this repo are under `apps/heat_orchestrator/` for organisation. You can copy that folder into AppDaemon's `apps/` as-is (it's scanned recursively) **or** flatten the two files directly into `apps/` — both work, and `module: heat_orchestrator` stays the same. Only add an `__init__.py` if you deliberately want a package, in which case change `apps.yaml` to `module: heat_orchestrator.heat_orchestrator`.
 
 2. AppDaemon will automatically detect the new files and load the app.
 
@@ -228,9 +230,10 @@ All parameters are adjustable live via the UI without restarting anything:
 | `input_number.min_pump_on_min` | Min pump run before allowing shutdown | Helpers page |
 | `input_number.min_pump_off_min` | Cooldown period after pump stops | Helpers page |
 | `input_number.dhw_min_run_hours` | Daily pump quota for hot water | Helpers page |
-| `input_number.bulk_mode_temp` | Above this outdoor temp → heat all demanding rooms | Helpers page |
-| `input_number.sequential_mode_temp` | Below this outdoor temp → heat only 1 room | Helpers page |
-| `input_number.max_rooms_limited` | Number of rooms in "limited" mode | Helpers page |
+| `input_number.lerp_temp_min` | Outdoor temp at/below which the room count is clamped to `lerp_rooms_min` | Helpers page |
+| `input_number.lerp_temp_max` | Outdoor temp at/above which the room count reaches `lerp_rooms_max` | Helpers page |
+| `input_number.lerp_rooms_min` | Fewest rooms heated at once (cold end of the LERP) | Helpers page |
+| `input_number.lerp_rooms_max` | Most rooms heated at once (mild end of the LERP) | Helpers page |
 | `input_number.priority_<room>` | Room priority (higher = heated first) | Helpers page |
 
 ---
@@ -264,22 +267,25 @@ entities:
     name: Heating Łazienka Parter
   - entity: input_boolean.heating_salon
     name: Heating Salon
+  - entity: input_boolean.heating_garaz
+    name: Heating Garaż
   - entity: input_boolean.heating_sypialnia
     name: Heating Sypialnia
   - entity: input_boolean.heating_lazienka_pietro
     name: Heating Łazienka Piętro
-  - entity: input_boolean.heating_pokoj_z_oknem_naroznym
-    name: Heating Pokój z oknem narożnym
-  - entity: input_boolean.heating_pokoj_z_tarasem
-    name: Heating Pokój z tarasem
+  - entity: input_boolean.heating_pokoj_narozny
+    name: Heating Pokój narożny
+  - entity: input_boolean.heating_pokoj_z_garazem
+    name: Heating Pokój z garażem
   - type: divider
   - entity: input_number.user_sp_salon
+  - entity: input_number.user_sp_garaz
   - entity: input_number.user_sp_sypialnia
   - entity: input_number.user_sp_gabinet_ani
   - entity: input_number.user_sp_lazienka_parter
   - entity: input_number.user_sp_lazienka_pietro
-  - entity: input_number.user_sp_pokoj_z_oknem_naroznym
-  - entity: input_number.user_sp_pokoj_z_tarasem
+  - entity: input_number.user_sp_pokoj_narozny
+  - entity: input_number.user_sp_pokoj_z_garazem
   - type: divider
   - entity: input_number.heating_hyst_on
   - entity: input_number.heating_hyst_off
@@ -287,9 +293,10 @@ entities:
   - entity: input_number.min_pump_on_min
   - entity: input_number.min_pump_off_min
   - entity: input_number.dhw_min_run_hours
-  - entity: input_number.bulk_mode_temp
-  - entity: input_number.sequential_mode_temp
-  - entity: input_number.max_rooms_limited
+  - entity: input_number.lerp_temp_min
+  - entity: input_number.lerp_temp_max
+  - entity: input_number.lerp_rooms_min
+  - entity: input_number.lerp_rooms_max
 ```
 
 ---
@@ -302,12 +309,14 @@ entities:
 - Verify all helper entities exist (the app handles missing entities gracefully but logs warnings)
 
 ### Pump doesn't turn on
-- Verify `switch.sonoff_10017fadeb` is available and controllable
+- Verify `script.uruchom_pompe` exists and runs correctly
+- Confirm `switch.zasilanie_pompy_sonoff_10017fadeb_1` switches ON when `script.uruchom_pompe` runs — the orchestrator reads this switch as the pump's on/off state
 - Check if you're inside the OFF window (01:00–06:00)
 - Check `input_number.min_pump_off_min` cooldown hasn't elapsed yet
 
 ### Pump doesn't turn off
-- The pump OFF uses `input_button.wylacznik_pompy` – make sure it triggers your graceful shutdown automation
+- The pump OFF uses `script.wylacz_pompe` – make sure it performs your graceful shutdown sequence
+- Verify `switch.zasilanie_pompy_sonoff_10017fadeb_1` switches OFF when `script.wylacz_pompe` runs (the orchestrator reads this switch, not power). Check the AppDaemon log for `[PUMP] OFF` and that `input_datetime.last_pump_off` updates
 - Check `input_number.min_pump_on_min` – the pump won't stop until this minimum is met
 
 ### User setpoints are lost
@@ -334,7 +343,7 @@ entities:
 │  │   1. Check OFF window                           │ │
 │  │   2. Calculate demand per room / floor          │ │
 │  │   3. Select active floor (highest score)        │ │
-│  │   4. Select rooms (bulk/limited/sequential)     │ │
+│  │   4. Select rooms (LERP by outdoor temp)        │ │
 │  │   5. Enable/disable rooms via thermostats       │ │
 │  │   6. Control pump ON/OFF                        │ │
 │  │   7. Handle DHW quota                           │ │
@@ -345,10 +354,14 @@ entities:
     │   Home Assistant    │  │   climate.*         │
     │   Helpers           │  │   (thermostats)     │
     │   (input_number,    │  │                     │
-    │    input_datetime,  │  │   switch.sonoff_*   │
+    │    input_datetime,  │  │   script.uruchom_*  │
     │    input_text)      │  │   (pump ON)         │
     │                     │  │                     │
-    │                     │  │   input_button.*    │
+    │                     │  │   script.wylacz_*   │
     │                     │  │   (pump OFF)        │
+    │                     │  │   switch.*_1        │
+    │                     │  │   (run-state)       │
+    │                     │  │   sensor.*_power    │
+    │                     │  │   (health check)    │
     └─────────────────────┘  └────────────────────┘
 ```

@@ -157,7 +157,11 @@ views:
             name: Last pump ON
           - entity: input_datetime.last_pump_off
             name: Last pump OFF
-          - entity: switch.zasilanie_pompy_sonoff_10017fadeb_1
+          # simple-entity renders the state only (no toggle). A plain row on
+          # a switch renders a live toggle and a tap would hard-cut the heat
+          # pump's mains, bypassing the graceful script.wylacz_pompe shutdown.
+          - type: simple-entity
+            entity: switch.zasilanie_pompy_sonoff_10017fadeb_1
             name: Pump mains (read-only)
 
       - type: glance

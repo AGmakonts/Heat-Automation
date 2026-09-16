@@ -12,6 +12,15 @@
 #           heat-orchestrator:
 #             mode: yaml
 #             title: Heat Orchestrator
+#             icon: mdi:radiator
+#             show_in_sidebar: true
+#             filename: dashboards/heat_orchestrator.yaml
+#
+# Requires the template sensors from
+# packages/heat_orchestrator_dashboard_sensors.yaml (sensor.ho_*) for the
+# Temperatures view. Everything else uses the standard helper entities.
+# =============================================================================
+title: Heat Orchestrator
 views:
   - title: Control
     path: control

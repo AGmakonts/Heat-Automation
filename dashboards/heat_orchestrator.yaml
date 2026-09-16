@@ -85,6 +85,10 @@ views:
             name: Min pump OFF time
           - entity: input_number.dhw_min_run_hours
             name: DHW min daily hours
+          - entity: input_number.dhw_exclusive_max_run_min
+            name: DHW-only max run (0 = continuous)
+          - entity: input_number.dhw_exclusive_pause_min
+            name: DHW-only pause (0 = continuous)
           - entity: input_number.max_continuous_heating_min
             name: Max continuous heating
 

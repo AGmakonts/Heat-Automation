@@ -38,6 +38,8 @@ This system controls a heat pump powering underfloor heating across two manifold
 ├── packages/
 │   ├── heat_orchestrator_helpers.yaml           # HA helpers (61 entities)
 │   └── heat_orchestrator_dashboard_sensors.yaml # Template sensors for graphs
+├── tests/
+│   └── test_heat_orchestrator_sim.py  # Minute-by-minute simulation (stubbed hassapi, pytest)
 ├── dashboards/
 │   └── heat_orchestrator.yaml     # Lovelace dashboard (control + diagnostics + graphs)
 ├── home-assistant-heat-orchestrator-spec.md  # Full specification
@@ -62,7 +64,7 @@ This system controls a heat pump powering underfloor heating across two manifold
 **Pump**
 - ON: `script.uruchom_pompe`
 - OFF: `script.wylacz_pompe` (graceful shutdown)
-- Run-state: the relay switch `switch.zasilanie_pompy_sonoff_10017fadeb_1` — the `uruchom`/`wylacz` scripts toggle it, so it reflects the commanded on/off state instantly. The power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` is used **only** as a health cross-check: if the pump is commanded on but draws < 50 W for several minutes, it's flagged `NO_FLOW` (`input_text.pump_health`).
+- Run-state: the relay switch `switch.zasilanie_pompy_sonoff_10017fadeb_1` — the `uruchom`/`wylacz` scripts toggle it, so it reflects the commanded on/off state within a tick (after `wylacz` the relay can still read on for one tick while the graceful shutdown runs; the orchestrator treats that as a pending stop). The power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` is used **only** as a health cross-check: if the pump is commanded on but draws < 50 W for several minutes, it's flagged `NO_FLOW` (`input_text.pump_health`).
 
 **Weather**
 - `weather.forecast_home` (Met.no)
@@ -167,3 +169,13 @@ Every 60 seconds the orchestrator runs a tick cycle:
 ## License
 
 Private project.
+
+## Tests
+
+A minute-by-minute simulation drives the real `_tick()` against an in-memory HA state table with a configurable relay lag (no AppDaemon or HA needed):
+
+```bash
+python -m pytest tests
+```
+
+It covers the DHW duty-cycle blocks and pauses, room-demand starts during a pause, steady-OFF re-parking (including unavailable and unmanaged TRVs), and the one-tick relay lag after a stop command.

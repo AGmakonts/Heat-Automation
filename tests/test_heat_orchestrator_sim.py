@@ -154,6 +154,7 @@ class Sim:
             "dhw_exclusive_max_run_min": 45, "dhw_exclusive_pause_min": 90,
             "bulk_mode_temp": 5, "sequential_mode_temp": -5, "max_rooms_limited": 2,
             "max_continuous_heating_min": 120,
+            "max_continuous_heating_solo_min": 240,
             "lerp_temp_min": -10, "lerp_temp_max": 10, "lerp_rooms_min": 1, "lerp_rooms_max": 5,
         }
         for k, v in num.items():
@@ -368,3 +369,394 @@ def test_off_window_stop_with_relay_lag_fires_stop_script_once():
     assert len(stops) == 1, stops
     assert not sim.pump_on()
     assert sim.state() == "OFF_LOCKOUT"
+
+
+# ---------------------------------------------------------------------------
+# Contention-aware continuous-heating cap, resume latch, empty-selection
+# fallback  (2026-09-18 morning log)
+# ---------------------------------------------------------------------------
+def _demand(sim: Sim, room_key: str, cur: float, user_sp: float = 23.5):
+    """Give a room a fixed current temperature and user setpoint."""
+    room = sim.mod.ROOMS[room_key]
+    sim.app.set(room.climate, "heat", current_temperature=cur)
+    sim.app.set(room.user_sp, user_sp)
+
+
+def _no_demand(sim: Sim, room_key: str):
+    _demand(sim, room_key, 25.0, 21.0)
+
+
+def _warm_morning(relay_lag_ticks: int = 0, t_out: float = 12.2) -> Sim:
+    """06:00, two GF rooms below setpoint, no FF demand — the logged case."""
+    sim = Sim(relay_lag_ticks=relay_lag_ticks, start=dt.datetime(2026, 9, 18, 6, 0, 0))
+    sim.app.set(sim.mod.WEATHER_ENTITY, "cloudy", temperature=t_out)
+    _demand(sim, "salon", 22.0)
+    _demand(sim, "lazienka_parter", 22.2)
+    return sim
+
+
+def test_uncontended_floor_is_not_forced_into_cooldown_at_the_rotation_cap():
+    """Two rooms, five slots, no FF demand: rotation would hand the slot to
+    nobody, so the 120 min cap must not fire (the 2026-09-18 07:00 case)."""
+    sim = _warm_morning()
+    sim.step(130)
+
+    assert sim.log_lines("forced cooldown") == []
+    assert sim.state() == "HEAT_GF"
+    for key in ("salon", "lazienka_parter"):
+        assert sim.app.get_state(sim.mod.ROOMS[key].heating) == "on"
+
+
+def test_uncontended_floor_still_stops_at_the_solo_safety_cap():
+    sim = _warm_morning()
+    sim.app.set("input_number.max_continuous_heating_solo_min", 150)
+    sim.step(155)
+
+    assert sim.log_lines("forced cooldown"), "solo cap must still bound the run"
+    assert "cap=150min" in sim.log_lines("forced cooldown")[0]
+    assert "contended=False" in sim.log_lines("forced cooldown")[0]
+
+
+def test_solo_cap_zero_means_no_limit_when_uncontended():
+    sim = _warm_morning()
+    sim.app.set("input_number.max_continuous_heating_solo_min", 0)
+    sim.step(8 * 60)
+
+    assert sim.log_lines("forced cooldown") == []
+
+
+def test_cap_still_rotates_when_more_rooms_want_heat_than_slots():
+    """Cold day: LERP allows one room, two want heat → contention → rotation."""
+    sim = Sim(start=dt.datetime(2026, 9, 18, 6, 0, 0))
+    sim.app.set(sim.mod.WEATHER_ENTITY, "cloudy", temperature=-10.0)  # LERP → 1 room
+    _demand(sim, "salon", 22.0)
+    _demand(sim, "gabinet_ani", 22.0)
+    sim.step(130)
+
+    cooldowns = sim.log_lines("forced cooldown")
+    assert cooldowns, "contended floor must still rotate"
+    assert "contended=True" in cooldowns[0]
+    assert "cap=120min" in cooldowns[0]
+
+
+def test_cap_still_rotates_when_the_other_floor_is_waiting():
+    """Five slots and only two GF rooms with demand, but FF wants heat with a
+    much lower score: the score comparison alone never flips, so the cap is the
+    only thing that hands FF the pump. Skipping it on room count alone (GF is
+    not full) would starve FF for the rest of the day."""
+    sim = _warm_morning()
+    _demand(sim, "sypialnia", 20.6, user_sp=21.0)  # FF demand, small deficit
+
+    assert sim.run_until(lambda: sim.state() == "HEAT_FF", 130), "FF never got the pump"
+    assert sim.app.get_state(sim.mod.ROOMS["sypialnia"].heating) == "on"
+    # the GF rooms were interrupted mid-job, not satisfied
+    assert sim.app.room_resume_pending["salon"]
+    assert sim.app.room_resume_pending["lazienka_parter"]
+
+
+def test_room_interrupted_by_rotation_resumes_inside_the_hysteresis_band():
+    """A room rotated out at sp-0.05 must finish the job when it gets the slot
+    back, not wait for the onset threshold (sp-0.3) that a slab can take hours
+    to drift down to."""
+    sim = _warm_morning()
+    _no_demand(sim, "lazienka_parter")
+    _demand(sim, "sypialnia", 20.6, user_sp=21.0)
+    assert sim.run_until(lambda: sim.state() == "HEAT_FF", 130)
+
+    # salon is now inside the band: below setpoint, above the onset threshold
+    _demand(sim, "salon", 23.45)          # sp 23.5, onset 23.2, satisfied 23.7
+    _demand(sim, "sypialnia", 21.3, user_sp=21.0)  # FF satisfied → GF's turn
+    assert sim.app.room_resume_pending["salon"]
+
+    assert sim.run_until(
+        lambda: sim.app.get_state(sim.mod.ROOMS["salon"].heating) == "on", 40
+    ), "interrupted room must resume without re-crossing the onset threshold"
+    assert sim.state() == "HEAT_GF"
+
+
+def test_a_room_that_never_started_is_not_latched():
+    """The latch means "interrupted mid-job", not "wants heat".
+
+    A room that crosses the onset threshold but never gets a slot was not
+    interrupted. Latching it would hold it in demand at the upper threshold
+    from its first dip onwards, which keeps the other floor's need_heat_floor
+    true, which keeps this floor contended, which puts the rotation cap back
+    in force on a floor with free slots.
+    """
+    sim = _warm_morning()                        # GF heats, 5 LERP slots
+    _demand(sim, "sypialnia", 20.69, user_sp=21.0)  # FF dips 0.01 below onset
+    sim.step(3)
+
+    assert sim.app.get_state(sim.mod.ROOMS["sypialnia"].heating) == "off"
+    assert not sim.app.room_resume_pending["sypialnia"], "never heated → never interrupted"
+
+    _demand(sim, "sypialnia", 20.90, user_sp=21.0)  # drifts back up on its own
+    sim.step(1)
+
+    assert not sim.app._has_demand("sypialnia"), "back above onset, was never mid-job"
+    gf_demand = [r for r in sim.mod.GF_ROOMS if sim.app._has_demand(r)]
+    assert not sim.app._floor_is_contended("GF", len(gf_demand))
+    assert sim.app._effective_max_continuous("GF", len(gf_demand)) == 240.0
+
+
+def test_a_room_interrupted_mid_job_is_latched():
+    """The mirror image: same floor, same thresholds, but the room was heating
+    when the orchestrator took its slot away."""
+    sim = _warm_morning()
+    _demand(sim, "sypialnia", 20.69, user_sp=21.0)
+    sim.step(3)
+    # hand the FF room a slot, let it heat, then rotate it out
+    _no_demand(sim, "salon")
+    _no_demand(sim, "lazienka_parter")
+    assert sim.run_until(
+        lambda: sim.app.get_state(sim.mod.ROOMS["sypialnia"].heating) == "on", 40)
+
+    _demand(sim, "salon", 20.0)   # GF outscores FF → floor switch takes the slot
+    assert sim.run_until(lambda: sim.state() == "HEAT_GF", 40)
+
+    assert sim.app.room_resume_pending["sypialnia"], "stopped mid-job → latched"
+
+
+def test_resume_latch_releases_when_the_room_is_satisfied():
+    sim = _warm_morning()
+    _no_demand(sim, "lazienka_parter")
+    _demand(sim, "sypialnia", 20.6, user_sp=21.0)
+    assert sim.run_until(lambda: sim.state() == "HEAT_FF", 130)
+    assert sim.app.room_resume_pending["salon"]
+
+    _demand(sim, "salon", 23.8)  # >= sp + hyst_off
+    sim.step(2)
+
+    assert not sim.app.room_resume_pending["salon"]
+    assert sim.app.get_state(sim.mod.ROOMS["salon"].heating) == "off"
+
+
+def test_resume_latch_does_not_survive_the_night_off_window():
+    sim = Sim(start=dt.datetime(2026, 9, 17, 21, 20, 0))
+    sim.app.set(sim.mod.WEATHER_ENTITY, "cloudy", temperature=12.0)
+    _demand(sim, "salon", 22.0)
+    sim.step(35)  # 21:55 — heating, mid-job
+    assert sim.app.get_state(sim.mod.ROOMS["salon"].heating) == "on"
+    sim.step(20)  # 22:15 — off window parked it and dropped the latch
+    assert not sim.app.room_resume_pending["salon"]
+
+    _demand(sim, "salon", 23.45)  # inside the band by morning
+    sim.step(9 * 60)              # through the night, past 06:00
+
+    assert not sim.app.room_resume_pending["salon"]
+    assert sim.app.get_state(sim.mod.ROOMS["salon"].heating) == "off", \
+        "a stale latch must not reopen a room sitting 0.05°C below setpoint"
+    assert sim.state() != "HEAT_GF"
+
+
+def _freeze_all_rooms(sim: Sim, minutes: int = 30):
+    """Put every room in cooldown, as a simultaneous rotation would."""
+    for key in sim.mod.ALL_ROOMS:
+        sim.app.room_cooldown_until[key] = sim.app.now + dt.timedelta(minutes=minutes)
+
+
+def test_no_selectable_rooms_puts_the_run_on_dhw_instead_of_closed_valves():
+    """The 07:01 log line: state=HEAT_GF rooms=[] with the pump running."""
+    sim = _warm_morning()
+    sim.step(30)
+    assert sim.state() == "HEAT_GF" and sim.pump_on()
+    _freeze_all_rooms(sim)
+    sim.step(2)
+
+    assert sim.state() == "DHW_QUOTA", sim.state()
+    assert sim.pump_on(), "quota left → keep the compressor working on DHW"
+    for key in sim.mod.ALL_ROOMS:
+        room = sim.mod.ROOMS[key]
+        assert sim.app.get_state(room.climate, attribute="temperature") == 7.0
+    assert sim.log_lines("reason=no_selectable_rooms")
+
+
+def test_no_selectable_rooms_and_no_quota_stops_the_pump():
+    sim = _warm_morning()
+    sim.app.set("input_number.dhw_min_run_hours", 0)  # no quota to fall back on
+    sim.step(45)  # past min_pump_on
+    assert sim.pump_on()
+    _freeze_all_rooms(sim)
+
+    assert sim.run_until(lambda: not sim.pump_on(), 5), "pump must not idle on closed valves"
+    assert sim.log_lines("reason=no_selectable_rooms")
+    assert sim.state() == "OFF"
+
+
+def test_no_selectable_rooms_waits_for_min_pump_on_before_stopping():
+    sim = _warm_morning()
+    sim.app.set("input_number.dhw_min_run_hours", 0)
+    sim.step(10)
+    _freeze_all_rooms(sim)
+    sim.step(5)
+
+    assert sim.pump_on(), "compressor protection wins over the idle stop"
+    assert sim.log_lines("no_selectable_rooms but waiting for min_pump_on")
+
+
+def test_rooms_come_back_after_cooldown_without_a_pump_restart_penalty():
+    sim = _warm_morning()
+    sim.step(30)
+    _freeze_all_rooms(sim, minutes=20)
+    starts_before = sim.app.get_state("input_number.pump_starts_today")
+
+    sim.step(30)
+
+    assert sim.pump_on()
+    assert sim.state() == "HEAT_GF"
+    assert sim.app.get_state("input_number.pump_starts_today") == starts_before, \
+        "a rotation gap must not cost a compressor start"
+
+
+# ---------------------------------------------------------------------------
+# Thermal scenarios
+#
+# The tests above drive fixed room temperatures, which isolates a decision but
+# cannot show what the decision costs over a morning. ThermalSim closes the
+# loop with a two-state slab/room model: the slab charges towards the flow
+# temperature while the room's valve is open and the pump runs, discharges into
+# the room afterwards (that residual is what makes a long uninterrupted run
+# overshoot), and the room leaks to outdoor in proportion to ΔT.
+#
+# The constants are deliberately mild-house/UFH shaped, not a model of this
+# specific building: ~1 °C/h rise on an open valve, ~0.4 °C/h drift at ΔT=30,
+# slab time constant ~50 min. Absolute minutes from these runs mean little;
+# the old-vs-new comparison on the same model is the point.
+# ---------------------------------------------------------------------------
+SLAB_CHARGE = 0.02      # slab → flow temp, per minute (τ ≈ 50 min)
+SLAB_TO_ROOM = 0.0015   # slab → room coupling, per minute
+ROOM_LOSS = 0.00022     # room → outdoor, per minute (≈0.4 °C/h at ΔT=30)
+
+
+class ThermalSim(Sim):
+    def __init__(self, t_out: float, **kw):
+        super().__init__(**kw)
+        self.t_out = t_out
+        self.app.set(self.mod.WEATHER_ENTITY, "cloudy", temperature=t_out)
+        self.slab = {k: 20.0 for k in self.mod.ALL_ROOMS}
+        self.history: list[dict] = []
+
+    @property
+    def flow_temp(self) -> float:
+        """Weather-compensated flow temperature: 40 °C at -15, 28 °C at +15."""
+        return max(28.0, min(40.0, 34.0 - 0.4 * self.t_out))
+
+    def setup_room(self, key: str, cur: float, user_sp: float, priority: int = 50):
+        room = self.mod.ROOMS[key]
+        self.app.set(room.climate, "heat", current_temperature=cur)
+        self.app.set(room.user_sp, user_sp)
+        self.app.set(room.priority, priority)
+        self.slab[key] = cur
+
+    def _valve_open(self, key: str) -> bool:
+        room = self.mod.ROOMS[key]
+        sp = self.app.get_state(room.climate, attribute="temperature")
+        cur = self.app.get_state(room.climate, attribute="current_temperature")
+        return sp is not None and cur is not None and float(sp) > float(cur) + 0.3
+
+    def advance_physics(self):
+        pump = self.pump_on()
+        for key in self.mod.ALL_ROOMS:
+            room = self.mod.ROOMS[key]
+            cur = float(self.app.get_state(room.climate, attribute="current_temperature"))
+            target = self.flow_temp if (pump and self._valve_open(key)) else cur
+            self.slab[key] += (target - self.slab[key]) * SLAB_CHARGE
+            cur += (self.slab[key] - cur) * SLAB_TO_ROOM
+            cur += (self.t_out - cur) * ROOM_LOSS
+            self.app.set(room.climate, "heat", current_temperature=round(cur, 3))
+
+    def run(self, minutes: int):
+        for _ in range(minutes):
+            self.step(1)
+            self.advance_physics()
+            self.history.append(self.snapshot())
+        return self
+
+    def snapshot(self) -> dict:
+        open_rooms = [k for k in self.mod.ALL_ROOMS
+                      if self.app.get_state(self.mod.ROOMS[k].heating) == "on"]
+        return {
+            "t": self.app.now,
+            "state": self.state(),
+            "pump": self.pump_on(),
+            "open": open_rooms,
+            "temps": {k: float(self.app.get_state(self.mod.ROOMS[k].climate,
+                                                  attribute="current_temperature"))
+                      for k in self.mod.ALL_ROOMS},
+        }
+
+    # --- metrics ------------------------------------------------------------
+    def idle_pump_minutes(self) -> int:
+        """Pump running in a HEAT state with every valve parked: pure loss.
+
+        DHW_QUOTA and the tick in which the stop script fires also show closed
+        valves, but there the closed valves are the point.
+        """
+        return sum(1 for h in self.history
+                   if h["pump"] and not h["open"] and h["state"].startswith("HEAT_"))
+
+    def pump_minutes(self) -> int:
+        return sum(1 for h in self.history if h["pump"])
+
+    def pump_starts(self) -> int:
+        return sum(1 for a, b in zip(self.history, self.history[1:])
+                   if not a["pump"] and b["pump"])
+
+    def valve_cycles(self, key: str) -> int:
+        return sum(1 for a, b in zip(self.history, self.history[1:])
+                   if key not in a["open"] and key in b["open"])
+
+    def deficit_minutes(self, key: str, target: float) -> int:
+        return sum(1 for h in self.history if h["temps"][key] < target)
+
+    def peak(self, key: str) -> float:
+        return max(h["temps"][key] for h in self.history)
+
+
+def test_thermal_uncontended_morning_reaches_setpoint_without_idling_the_pump():
+    """The logged scenario, with the rooms allowed to actually warm up."""
+    sim = ThermalSim(t_out=12.2, start=dt.datetime(2026, 9, 18, 5, 0, 0))
+    sim.setup_room("salon", 21.8, 23.5)
+    sim.setup_room("lazienka_parter", 22.0, 23.5)
+    for key in sim.mod.ALL_ROOMS:
+        if key not in ("salon", "lazienka_parter"):
+            sim.setup_room(key, 24.0, 21.0)
+    sim.run(8 * 60)
+
+    assert sim.idle_pump_minutes() == 0, "pump must never run on closed valves"
+    # Both rooms finish the job instead of being cut at 120 min and left short.
+    assert sim.history[-1]["temps"]["salon"] >= 23.5
+    assert sim.history[-1]["temps"]["lazienka_parter"] >= 23.5
+    # The 240 min solo cap still fires once on a job this long. With the DHW
+    # quota already spent by then there is nothing else for the run to do, so
+    # it costs one extra compressor start; the resume latch brings both rooms
+    # straight back after the cooldown.
+    assert sim.pump_starts() <= 2
+    assert sim.valve_cycles("salon") <= 2
+    assert sim.peak("salon") <= 24.0, sim.peak("salon")
+
+
+def test_thermal_cold_day_contention_still_shares_the_pump_between_floors():
+    sim = ThermalSim(t_out=-10.0, start=dt.datetime(2026, 9, 18, 6, 0, 0))
+    for key in sim.mod.ALL_ROOMS:
+        sim.setup_room(key, 24.0, 21.0)
+    sim.setup_room("salon", 20.0, 21.5)          # GF, biggest deficit
+    sim.setup_room("sypialnia", 20.4, 21.0)      # FF, smaller deficit
+    sim.run(8 * 60)
+
+    floors = {h["state"] for h in sim.history}
+    assert "HEAT_GF" in floors and "HEAT_FF" in floors, "FF must not starve"
+    assert sim.idle_pump_minutes() == 0
+    assert sim.valve_cycles("salon") <= 6, "rotation must not thrash the TRV"
+
+
+def test_outdoor_temp_is_read_once_per_tick_when_the_weather_entity_is_degraded():
+    """Room selection asks for the outdoor temperature several times per tick;
+    the fallback path calls a service, so it must be memoised."""
+    sim = Sim(start=dt.datetime(2026, 9, 18, 6, 0, 0))
+    sim.app.set(sim.mod.WEATHER_ENTITY, "unavailable", temperature=None)
+    _demand(sim, "salon", 22.0)
+
+    sim.step(10)
+
+    assert len(sim.calls("weather/get_forecasts")) == 10

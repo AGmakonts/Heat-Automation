@@ -288,6 +288,18 @@ input_number:
     unit_of_measurement: "min"
     icon: mdi:timer-alert
 
+  # Applies only when nothing is waiting for the slot: no other floor with
+  # demand and fewer rooms with demand than the LERP room limit allows.
+  # 0 = no limit in that case.
+  max_continuous_heating_solo_min:
+    name: "Max Continuous Heating Time (uncontended)"
+    min: 0
+    max: 720
+    step: 15
+    initial: 240
+    unit_of_measurement: "min"
+    icon: mdi:timer-sand
+
   # ---------------------------------------------------------------------------
   # Per-room accumulated heating minutes (for max continuous heating tracking)
   # ---------------------------------------------------------------------------

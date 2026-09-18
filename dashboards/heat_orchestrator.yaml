@@ -79,6 +79,8 @@ views:
             name: DHW-only pause (0 = continuous)
           - entity: input_number.max_continuous_heating_min
             name: Max continuous heating
+          - entity: input_number.max_continuous_heating_solo_min
+            name: Max continuous heating (uncontended)
       - type: entities
         title: Room scaling (LERP by outdoor temp)
         entities:

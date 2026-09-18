@@ -154,6 +154,7 @@ class Sim:
             "dhw_exclusive_max_run_min": 45, "dhw_exclusive_pause_min": 90,
             "bulk_mode_temp": 5, "sequential_mode_temp": -5, "max_rooms_limited": 2,
             "max_continuous_heating_min": 120,
+            "max_continuous_heating_solo_min": 240,
             "lerp_temp_min": -10, "lerp_temp_max": 10, "lerp_rooms_min": 1, "lerp_rooms_max": 5,
         }
         for k, v in num.items():

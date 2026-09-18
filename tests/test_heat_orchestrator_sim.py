@@ -474,6 +474,49 @@ def test_room_interrupted_by_rotation_resumes_inside_the_hysteresis_band():
     assert sim.state() == "HEAT_GF"
 
 
+def test_a_room_that_never_started_is_not_latched():
+    """The latch means "interrupted mid-job", not "wants heat".
+
+    A room that crosses the onset threshold but never gets a slot was not
+    interrupted. Latching it would hold it in demand at the upper threshold
+    from its first dip onwards, which keeps the other floor's need_heat_floor
+    true, which keeps this floor contended, which puts the rotation cap back
+    in force on a floor with free slots.
+    """
+    sim = _warm_morning()                        # GF heats, 5 LERP slots
+    _demand(sim, "sypialnia", 20.69, user_sp=21.0)  # FF dips 0.01 below onset
+    sim.step(3)
+
+    assert sim.app.get_state(sim.mod.ROOMS["sypialnia"].heating) == "off"
+    assert not sim.app.room_resume_pending["sypialnia"], "never heated → never interrupted"
+
+    _demand(sim, "sypialnia", 20.90, user_sp=21.0)  # drifts back up on its own
+    sim.step(1)
+
+    assert not sim.app._has_demand("sypialnia"), "back above onset, was never mid-job"
+    gf_demand = [r for r in sim.mod.GF_ROOMS if sim.app._has_demand(r)]
+    assert not sim.app._floor_is_contended("GF", len(gf_demand))
+    assert sim.app._effective_max_continuous("GF", len(gf_demand)) == 240.0
+
+
+def test_a_room_interrupted_mid_job_is_latched():
+    """The mirror image: same floor, same thresholds, but the room was heating
+    when the orchestrator took its slot away."""
+    sim = _warm_morning()
+    _demand(sim, "sypialnia", 20.69, user_sp=21.0)
+    sim.step(3)
+    # hand the FF room a slot, let it heat, then rotate it out
+    _no_demand(sim, "salon")
+    _no_demand(sim, "lazienka_parter")
+    assert sim.run_until(
+        lambda: sim.app.get_state(sim.mod.ROOMS["sypialnia"].heating) == "on", 40)
+
+    _demand(sim, "salon", 20.0)   # GF outscores FF → floor switch takes the slot
+    assert sim.run_until(lambda: sim.state() == "HEAT_GF", 40)
+
+    assert sim.app.room_resume_pending["sypialnia"], "stopped mid-job → latched"
+
+
 def test_resume_latch_releases_when_the_room_is_satisfied():
     sim = _warm_morning()
     _no_demand(sim, "lazienka_parter")

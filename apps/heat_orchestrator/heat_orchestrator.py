@@ -115,7 +115,7 @@ class HeatOrchestrator(hass.Hass):
 
         # Last known outdoor temperature (fallback) and the tick it was read on
         self._last_outdoor_temp: float | None = None
-        self._outdoor_temp_tick: int = -1
+        self._outdoor_temp_minute: datetime.datetime | None = None
         self._outdoor_temp_cached: float = 0.0
 
         # Pump health (power-meter cross-check) — diagnostic only, never used to
@@ -389,11 +389,17 @@ class HeatOrchestrator(hass.Hass):
         Room selection asks for it several times per tick (room limit, both
         floors' contention check). The attribute read is cheap, but the
         fallback path calls weather.get_forecasts, which is not.
+
+        Keyed on the wall-clock minute rather than the tick counter, so a
+        caller outside `_tick` (a state listener, a scheduled callback) gets a
+        value with a bounded age instead of whatever the last tick happened to
+        read. The tick period is 60 s, so inside a tick the two are equivalent.
         """
-        if self._outdoor_temp_tick == self._tick_counter:
+        minute = self.datetime().replace(second=0, microsecond=0)
+        if self._outdoor_temp_minute == minute:
             return self._outdoor_temp_cached
         value = self._read_outdoor_temp()
-        self._outdoor_temp_tick = self._tick_counter
+        self._outdoor_temp_minute = minute
         self._outdoor_temp_cached = value
         return value
 
@@ -520,6 +526,8 @@ class HeatOrchestrator(hass.Hass):
             # Heating, or interrupted mid-job → keep going until satisfied
             if self._satisfied(room):
                 # Latch releases on satisfaction, never on the onset threshold.
+                # This is the one mutation in an otherwise read-only predicate;
+                # it is idempotent, so every caller can afford it.
                 self.room_resume_pending[room] = False
                 return False
             return True
@@ -527,10 +535,23 @@ class HeatOrchestrator(hass.Hass):
             # Not heating → only start at onset threshold
             return self._need_heat(room)
 
-    def _mark_resume_pending(self, room: str):
-        """Latch a room that still wants heat but is being switched off by the
-        orchestrator rather than by reaching its setpoint."""
-        self.room_resume_pending[room] = True
+    def _latch_if_interrupted(self, room: str):
+        """Latch a room that is being switched off mid-job.
+
+        Both conditions are load-bearing and evaluated *before* the room is
+        switched off, while its heating flag still reads "on":
+
+        * `_is_room_heating` — the room was actually being heated. A room that
+          merely crossed the onset threshold and never got a slot was not
+          interrupted, and latching it would hold it in demand at the upper
+          threshold from its first dip onwards. That would keep the other
+          floor's `_need_heat_floor` true and so keep this floor permanently
+          "contended", re-imposing the rotation cap this app is trying to lift.
+        * `_has_demand` — it stopped short. A room that reached its setpoint
+          was satisfied, not interrupted.
+        """
+        if self._is_room_heating(room) and self._has_demand(room):
+            self.room_resume_pending[room] = True
 
     def _clear_resume_pending(self, room: str | None = None):
         if room is None:
@@ -881,11 +902,22 @@ class HeatOrchestrator(hass.Hass):
             return True
         return demand_count > self._max_rooms_for_floor(floor)
 
-    def _effective_max_continuous(self, floor: str, demand_count: int) -> float:
-        """Continuous-heating cap that applies right now. 0 = no limit."""
-        if self._floor_is_contended(floor, demand_count):
+    def _effective_max_continuous(
+        self, floor: str, demand_count: int, contended: bool | None = None
+    ) -> float:
+        """Continuous-heating cap that applies right now. 0 = no limit.
+
+        The two helpers have overlapping ranges, so an uncontended floor is
+        never held to a tighter cap than a contended one would be: that would
+        invert the premise of the whole rule. 0 stays special-cased, since it
+        means "no limit", not "zero minutes".
+        """
+        if contended is None:
+            contended = self._floor_is_contended(floor, demand_count)
+        if contended:
             return self.max_continuous_heating_min
-        return self.max_continuous_heating_solo_min
+        solo = self.max_continuous_heating_solo_min
+        return solo if solo == 0 else max(solo, self.max_continuous_heating_min)
 
     def _build_candidates(self, floor: str, apply_side_effects: bool = True) -> list[str]:
         """Build list of rooms with demand that are eligible (not in cooldown).
@@ -893,7 +925,9 @@ class HeatOrchestrator(hass.Hass):
         Args:
             floor: "GF" or "FF"
             apply_side_effects: If True, applies cooldown when rooms exceed max time.
-                               If False, only checks eligibility without side effects.
+                               If False, skips that. Note this does not make the
+                               call pure: evaluating demand still releases the
+                               resume latch of any satisfied room.
 
         Returns:
             List of eligible rooms (not sorted, not LERP-limited).
@@ -902,7 +936,8 @@ class HeatOrchestrator(hass.Hass):
         now = self.datetime()
 
         demand_rooms = [r for r in rooms if self._has_demand(r)]
-        max_continuous = self._effective_max_continuous(floor, len(demand_rooms))
+        contended = self._floor_is_contended(floor, len(demand_rooms))
+        max_continuous = self._effective_max_continuous(floor, len(demand_rooms), contended)
 
         candidates = []
         for room in demand_rooms:
@@ -917,7 +952,7 @@ class HeatOrchestrator(hass.Hass):
                     self._reset_heating_minutes(room)
                     self.log(
                         f"[ROOM] {room} forced cooldown after {heating_min:.0f}min continuous heating "
-                        f"(cap={max_continuous:.0f}min, contended={self._floor_is_contended(floor, len(demand_rooms))})"
+                        f"(cap={max_continuous:.0f}min, contended={contended})"
                     )
                 # Always exclude rooms that exceeded max heating time
                 continue
@@ -934,8 +969,12 @@ class HeatOrchestrator(hass.Hass):
     def _has_selectable_rooms(self, floor: str) -> bool:
         """Check if a floor has any rooms with demand that are NOT in cooldown.
 
-        This is a pure predicate check without side effects - does not trigger
-        cooldown enforcement or logging. Used for floor-switching decisions.
+        Does not trigger cooldown enforcement or logging; used for
+        floor-switching decisions. Not entirely side-effect free: evaluating
+        demand releases the resume latch of any room that has since reached its
+        setpoint (`_has_demand`). That release is idempotent and carries no
+        service call, so it is safe on this path — but `apply_side_effects`
+        governs only the cooldown branch, not every mutation below it.
         """
         return bool(self._build_candidates(floor, apply_side_effects=False))
 
@@ -1157,6 +1196,13 @@ class HeatOrchestrator(hass.Hass):
                 # valves (all TRVs parked at room_off_setpoint) for the whole
                 # cooldown, producing nothing. Put the run to work on DHW if
                 # there is quota left, otherwise stop it.
+                #
+                # This is a second entry into DHW_QUOTA, and unlike the one
+                # below it runs with has_demand True, so dhw_exclusive_max_run
+                # (which lives in the `elif remaining_quota > 0` branch) does
+                # not bound it. It does not need to: the cooldown that emptied
+                # both floors is min_state_duration long, so the run returns to
+                # HEAT_* as soon as the rooms come back.
                 other_floor = "FF" if active_floor == "GF" else "GF"
                 if not self._has_selectable_rooms(other_floor):
                     if remaining_quota > 0:
@@ -1270,16 +1316,11 @@ class HeatOrchestrator(hass.Hass):
                 self._enable_room(room)
                 self._clear_resume_pending(room)
             else:
-                # Demand evaluated *before* the room is switched off, while the
-                # heating flag still reads "on": a room dropped here wanted heat
-                # and is being interrupted, not satisfied.
-                if self._has_demand(room):
-                    self._mark_resume_pending(room)
+                self._latch_if_interrupted(room)
                 self._disable_room(room)
 
         for room in inactive_rooms:
-            if self._has_demand(room):
-                self._mark_resume_pending(room)
+            self._latch_if_interrupted(room)
             self._disable_room(room)
             self._reset_heating_minutes(room)
 
@@ -1287,8 +1328,7 @@ class HeatOrchestrator(hass.Hass):
 
     def _disable_all_rooms(self):
         for room in ALL_ROOMS:
-            if self._has_demand(room):
-                self._mark_resume_pending(room)
+            self._latch_if_interrupted(room)
             self._disable_room(room)
             self._reset_heating_minutes(room)
 

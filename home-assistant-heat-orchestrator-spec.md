@@ -170,9 +170,13 @@ Definicje:
   - pokój grzany **lub** z ustawioną flagą `resume_pending` → `not satisfied(r)`
   - pozostałe → `need_heat(r)`
 
-`resume_pending(r)` – pokój został wyłączony **przez orkiestrator** (rotacja,
-cooldown po `max_continuous`, limit LERP, przełączenie piętra), a nie dlatego,
-że osiągnął temperaturę. Taki pokój zachowuje górny próg histerezy, więc po
+`resume_pending(r)` – pokój **był grzany** i został wyłączony **przez
+orkiestrator** (rotacja, cooldown po `max_continuous`, limit LERP,
+przełączenie piętra), a nie dlatego, że osiągnął temperaturę. Oba warunki są
+istotne: pokój, który tylko przekroczył próg `need_heat`, ale nigdy nie dostał
+miejsca, **nie** jest flagowany – inaczej trzymałby demand na górnym progu od
+pierwszego spadku, co utrzymywałoby `need_heat_floor` drugiego piętra i tym
+samym wracałoby do limitu rotacyjnego na piętrze z wolnymi miejscami. Taki pokój zachowuje górny próg histerezy, więc po
 powrocie dokańcza grzanie zamiast czekać, aż spadnie poniżej `Tuser - hon`.
 Bez tego pokój przerwany wewnątrz pasma histerezy (0.5°C przy domyślnych
 nastawach) potrafi czekać godzinami na dryf płyty grzewczej.
@@ -252,6 +256,9 @@ czeka na zwolnione miejsce. Piętro `F` jest uznane za rywalizujące, gdy:
 Obowiązujący limit:
 - `contended` → `max_continuous_heating_min`
 - w przeciwnym razie → `max_continuous_heating_solo_min` (0 = bez limitu)
+- zakresy obu helperów zachodzą na siebie, więc limit „solo" nigdy nie jest
+  ciaśniejszy od rotacyjnego: `max(solo, max_continuous_heating_min)`.
+  Wartość `0` jest wyjątkiem (oznacza brak limitu, nie zero minut)
 
 Logika:
 - Dla każdego pokoju śledzone są:
@@ -277,7 +284,11 @@ Scenariusz:
 - Jeśli **żadne** piętro nie ma pokoi do wyboru, a pompa pracuje (stan `HEAT_*`
   z pustą listą pokoi – wszystkie TRV zaparkowane na `room_off_setpoint`):
   - `quota_remaining > 0` → przejdź do `DHW_QUOTA` (bieg pompy idzie na CWU
-    zamiast na zamknięte zawory)
+    zamiast na zamknięte zawory). Jest to **drugie** wejście w `DHW_QUOTA`,
+    z `has_demand = True`, więc `dhw_exclusive_max_run` (sekcja duty-cycle,
+    osiągalna tylko przy `has_demand = False`) go nie ogranicza. Nie musi:
+    cooldown, który opróżnił oba piętra, trwa `min_state_duration`, po czym
+    pokoje wracają i stan przechodzi z powrotem w `HEAT_*`
   - w przeciwnym razie → wyłącz pompę po spełnieniu `min_pump_on`, stan `OFF`
   - Log: `[DECISION] ... reason=no_selectable_rooms`
 

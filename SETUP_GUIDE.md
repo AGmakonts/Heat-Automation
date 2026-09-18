@@ -88,6 +88,7 @@ Then create global helpers:
 | Number | `sequential_mode_temp` ⚠️ | -30–10 | 1 | -5 | °C |
 | Number | `max_rooms_limited` ⚠️ | 1–7 | 1 | 2 | – |
 | Number | `max_continuous_heating_min` | 30–480 | 15 | 120 | min |
+| Number | `max_continuous_heating_solo_min` | 0–720 | 15 | 240 | min |
 | Number | `lerp_temp_min` ✅ | -30–10 | 1 | -10 | °C |
 | Number | `lerp_temp_max` ✅ | -10–30 | 1 | 10 | °C |
 | Number | `lerp_rooms_min` ✅ | 1–3 | 1 | 1 | – |

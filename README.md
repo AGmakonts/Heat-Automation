@@ -141,7 +141,8 @@ INFO heat_orchestrator: === HeatOrchestrator ready ===
 | Bulk mode threshold (legacy, unused) | +5°C | `input_number.bulk_mode_temp` |
 | Sequential mode threshold (legacy, unused) | -5°C | `input_number.sequential_mode_temp` |
 | Max rooms, limited mode (legacy, unused) | 2 | `input_number.max_rooms_limited` |
-| Max continuous heating time | 120 min | `input_number.max_continuous_heating_min` |
+| Max continuous heating time (contended) | 120 min | `input_number.max_continuous_heating_min` |
+| Max continuous heating time (uncontended) | 240 min | `input_number.max_continuous_heating_solo_min` |
 | LERP temp min (1 room) | -10°C | `input_number.lerp_temp_min` |
 | LERP temp max (max rooms) | +10°C | `input_number.lerp_temp_max` |
 | LERP min rooms | 1 | `input_number.lerp_rooms_min` |

@@ -166,6 +166,21 @@ Dla pokoju `r`:
 Definicje:
 - `need_heat(r) = (Tcur < Tuser - hon)`
 - `satisfied(r) = (Tcur >= Tuser + hoff)`
+- `has_demand(r)`:
+  - pokój grzany **lub** z ustawioną flagą `resume_pending` → `not satisfied(r)`
+  - pozostałe → `need_heat(r)`
+
+`resume_pending(r)` – pokój został wyłączony **przez orkiestrator** (rotacja,
+cooldown po `max_continuous`, limit LERP, przełączenie piętra), a nie dlatego,
+że osiągnął temperaturę. Taki pokój zachowuje górny próg histerezy, więc po
+powrocie dokańcza grzanie zamiast czekać, aż spadnie poniżej `Tuser - hon`.
+Bez tego pokój przerwany wewnątrz pasma histerezy (0.5°C przy domyślnych
+nastawach) potrafi czekać godzinami na dryf płyty grzewczej.
+- flaga jest **kasowana** gdy: `satisfied(r)`, pokój zostaje ponownie włączony,
+  zaczyna się okno OFF (nocna przerwa jest za długa, by flaga pozostała aktualna),
+  oraz przy dobowym resecie
+- flaga jest trzymana w pamięci (jak `room_cooldown_until`), więc restart
+  AppDaemon przywraca zachowanie sprzed zmiany: pokój wraca na dolny próg
 
 Dla piętra:
 - `need_heat_floor(F) = any(need_heat(r) for r in rooms(F))`
@@ -222,18 +237,31 @@ Tryb:
 
 ### 6.3 Maksymalny czas ciągłego grzania pokoju
 Wymagane helpery:
-- `input_number.max_continuous_heating_min` (min) – np. 120 (maksymalny czas ciągłego grzania jednego pokoju)
+- `input_number.max_continuous_heating_min` (min) – np. 120 (maksymalny czas ciągłego grzania jednego pokoju **przy rywalizacji o miejsce**)
+- `input_number.max_continuous_heating_solo_min` (min) – np. 240 (limit gdy nikt nie czeka na miejsce; `0` = brak limitu)
 - `input_number.heating_minutes_<room_id>` (min) – skumulowany czas grzania per pokój (przechowywany w HA, przetrwa restart AppDaemon)
+
+**Rywalizacja (`contended`)** – limit rotacyjny ma sens tylko wtedy, gdy ktoś
+czeka na zwolnione miejsce. Piętro `F` jest uznane za rywalizujące, gdy:
+- `need_heat_floor(other(F))` – drugie piętro ma demand (rotacja to jedyny
+  mechanizm, który opróżnia listę kandydatów i pozwala przełączyć piętro;
+  sam `floor_score` potrafi nie przełączyć się przez wiele godzin, gdy
+  zaniedbane piętro ma niższy priorytet), **lub**
+- liczba pokoi z demand na `F` > limit LERP dla aktualnego `T_out`
+
+Obowiązujący limit:
+- `contended` → `max_continuous_heating_min`
+- w przeciwnym razie → `max_continuous_heating_solo_min` (0 = bez limitu)
 
 Logika:
 - Dla każdego pokoju śledzone są:
   - `input_number.heating_minutes_<room_id>` – skumulowany czas grzania (min), inkrementowany co tick (+1) gdy pokój jest aktywnie grzany (`_is_room_heating()`)
   - `room_cooldown_until[room]` – timestamp końca okresu cooldown (in-memory)
-- Gdy `heating_minutes >= max_continuous_heating_min`:
+- Gdy `heating_minutes >= obowiązujący limit` (i limit != 0):
   - Pokój jest **wyłączany z listy kandydatów** w `_select_rooms()`
   - Pokój wchodzi w **cooldown** na czas = `min_state_duration_min`
   - Licznik `heating_minutes` jest **resetowany do 0**
-  - Log: `[ROOM] {room} forced cooldown after {minutes}min continuous heating`
+  - Log: `[ROOM] {room} forced cooldown after {minutes}min continuous heating (cap={limit}min, contended={bool})`
   - **Ważne:** Pokój nadal zwraca `need_heat()=True` (aby poprawnie obliczać demand na piętrze i nie tracić demand floor)
 - Po zakończeniu cooldown pokój znów staje się dostępny do wyboru
 - **Ważne:** `_disable_room()` **NIE** resetuje licznika `heating_minutes` – dzięki temu pokój tymczasowo wyłączony (np. po osiągnięciu temperatury docelowej) zachowuje swój skumulowany czas grzania
@@ -246,6 +274,12 @@ Logika:
 
 Scenariusz:
 - Jeśli wszystkie pokoje na aktywnym piętrze są w cooldown, ale drugie piętro ma demand → system może przełączyć piętro (jeśli `min_state_duration` pozwala)
+- Jeśli **żadne** piętro nie ma pokoi do wyboru, a pompa pracuje (stan `HEAT_*`
+  z pustą listą pokoi – wszystkie TRV zaparkowane na `room_off_setpoint`):
+  - `quota_remaining > 0` → przejdź do `DHW_QUOTA` (bieg pompy idzie na CWU
+    zamiast na zamknięte zawory)
+  - w przeciwnym razie → wyłącz pompę po spełnieniu `min_pump_on`, stan `OFF`
+  - Log: `[DECISION] ... reason=no_selectable_rooms`
 
 ---
 

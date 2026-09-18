@@ -113,8 +113,10 @@ class HeatOrchestrator(hass.Hass):
         # Set of rooms temporarily marked as "unmanaged" after errors
         self.unmanaged_rooms: dict[str, datetime.datetime] = {}
 
-        # Last known outdoor temperature (fallback)
+        # Last known outdoor temperature (fallback) and the tick it was read on
         self._last_outdoor_temp: float | None = None
+        self._outdoor_temp_tick: int = -1
+        self._outdoor_temp_cached: float = 0.0
 
         # Pump health (power-meter cross-check) — diagnostic only, never used to
         # decide whether the pump is on. "OK" | "NO_FLOW" | "OFF" | "UNKNOWN".
@@ -127,6 +129,12 @@ class HeatOrchestrator(hass.Hass):
 
         # Track per-room cooldown expiry time
         self.room_cooldown_until: dict[str, datetime.datetime | None] = {r: None for r in ALL_ROOMS}
+
+        # Rooms switched off by the orchestrator while they still wanted heat
+        # (rotation cap, forced cooldown, room limit, floor switch). They keep
+        # the "keep heating until satisfied" threshold when they come back, so
+        # an interruption cannot strand them inside the hysteresis band.
+        self.room_resume_pending: dict[str, bool] = {r: False for r in ALL_ROOMS}
 
         # --- Bootstrap user setpoints if empty ---
         self._bootstrap_user_setpoints()
@@ -336,7 +344,15 @@ class HeatOrchestrator(hass.Hass):
 
     @property
     def max_continuous_heating_min(self) -> float:
+        """Max continuous heating per room [min] while the floor is contended."""
         return self._param("input_number.max_continuous_heating_min", 120.0)
+
+    @property
+    def max_continuous_heating_solo_min(self) -> float:
+        """Max continuous heating per room [min] when nothing is waiting for the
+        slot (no contention). Guards against slab overcharge only; 0 disables
+        the limit entirely. See `_floor_is_contended`."""
+        return self._param("input_number.max_continuous_heating_solo_min", 240.0)
 
     # -----------------------------------------------------------------------
     # OFF window
@@ -368,6 +384,20 @@ class HeatOrchestrator(hass.Hass):
     # Outdoor temperature
     # -----------------------------------------------------------------------
     def _get_outdoor_temp(self) -> float:
+        """Outdoor temperature, memoised for the duration of one tick.
+
+        Room selection asks for it several times per tick (room limit, both
+        floors' contention check). The attribute read is cheap, but the
+        fallback path calls weather.get_forecasts, which is not.
+        """
+        if self._outdoor_temp_tick == self._tick_counter:
+            return self._outdoor_temp_cached
+        value = self._read_outdoor_temp()
+        self._outdoor_temp_tick = self._tick_counter
+        self._outdoor_temp_cached = value
+        return value
+
+    def _read_outdoor_temp(self) -> float:
         # Try attribute first
         temp = self.get_state(WEATHER_ENTITY, attribute="temperature")
         if temp is not None:
@@ -473,17 +503,41 @@ class HeatOrchestrator(hass.Hass):
         For rooms already heating: keep heating until satisfied (offset threshold).
         For rooms not heating: only start if need_heat (onset threshold).
         This creates the proper two-threshold hysteresis band.
+
+        A room that the orchestrator stopped *involuntarily* (rotation cap,
+        forced cooldown, LERP room limit, floor switch) keeps the upper
+        threshold as well — see `room_resume_pending`. Without that it would
+        have to fall back below the onset threshold before it could finish the
+        job it was interrupted in, which strands it inside the hysteresis band
+        (a 0.5 °C dead zone at the defaults) for as long as the slab takes to
+        drift back down.
         """
         # Respect unmanaged room timeout
         if self._is_unmanaged(room):
             return False
 
-        if self._is_room_heating(room):
-            # Currently heating → keep going until satisfied (offset threshold)
-            return not self._satisfied(room)
+        if self._is_room_heating(room) or self.room_resume_pending.get(room):
+            # Heating, or interrupted mid-job → keep going until satisfied
+            if self._satisfied(room):
+                # Latch releases on satisfaction, never on the onset threshold.
+                self.room_resume_pending[room] = False
+                return False
+            return True
         else:
             # Not heating → only start at onset threshold
             return self._need_heat(room)
+
+    def _mark_resume_pending(self, room: str):
+        """Latch a room that still wants heat but is being switched off by the
+        orchestrator rather than by reaching its setpoint."""
+        self.room_resume_pending[room] = True
+
+    def _clear_resume_pending(self, room: str | None = None):
+        if room is None:
+            for r in ALL_ROOMS:
+                self.room_resume_pending[r] = False
+        else:
+            self.room_resume_pending[room] = False
 
     # -----------------------------------------------------------------------
     # Scoring
@@ -803,6 +857,36 @@ class HeatOrchestrator(hass.Hass):
             self.room_cooldown_until[room] = None
         return False
 
+    def _max_rooms_for_floor(self, floor: str) -> int:
+        """LERP room limit, clamped to the number of rooms on the floor."""
+        rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
+        return min(self._lerp_max_rooms(self._get_outdoor_temp()), len(rooms))
+
+    def _floor_is_contended(self, floor: str, demand_count: int) -> bool:
+        """Is anything actually waiting for a heating slot?
+
+        The continuous-heating cap exists to rotate the slot between rooms
+        that cannot all be served at once. That is the case when either
+
+        * more rooms on this floor want heat than the LERP limit allows, or
+        * the other floor wants heat — the cap is what eventually empties this
+          floor's candidate list and lets the floor switch happen, since the
+          score comparison alone never flips while this floor's deficit leads.
+
+        With neither true, kicking a room out of its slot hands that slot to
+        nobody: the room just cools back down and gets re-enabled later.
+        """
+        other = "FF" if floor == "GF" else "GF"
+        if self._need_heat_floor(other):
+            return True
+        return demand_count > self._max_rooms_for_floor(floor)
+
+    def _effective_max_continuous(self, floor: str, demand_count: int) -> float:
+        """Continuous-heating cap that applies right now. 0 = no limit."""
+        if self._floor_is_contended(floor, demand_count):
+            return self.max_continuous_heating_min
+        return self.max_continuous_heating_solo_min
+
     def _build_candidates(self, floor: str, apply_side_effects: bool = True) -> list[str]:
         """Build list of rooms with demand that are eligible (not in cooldown).
 
@@ -817,21 +901,24 @@ class HeatOrchestrator(hass.Hass):
         rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
         now = self.datetime()
 
-        candidates = []
-        for room in rooms:
-            # Check if room needs heat
-            if not self._has_demand(room):
-                continue
+        demand_rooms = [r for r in rooms if self._has_demand(r)]
+        max_continuous = self._effective_max_continuous(floor, len(demand_rooms))
 
-            # Check if room has exceeded max continuous heating time
+        candidates = []
+        for room in demand_rooms:
+            # Check if room has exceeded the continuous heating time that
+            # applies under the current contention (0 = uncapped).
             heating_min = self._get_heating_minutes(room)
-            if heating_min >= self.max_continuous_heating_min:
+            if max_continuous > 0 and heating_min >= max_continuous:
                 # Apply cooldown/reset/logging only when side effects are enabled
                 if apply_side_effects and not self._is_room_in_cooldown(room, now):
                     cooldown_duration_min = self.min_state_duration
                     self.room_cooldown_until[room] = now + datetime.timedelta(minutes=cooldown_duration_min)
                     self._reset_heating_minutes(room)
-                    self.log(f"[ROOM] {room} forced cooldown after {heating_min:.0f}min continuous heating")
+                    self.log(
+                        f"[ROOM] {room} forced cooldown after {heating_min:.0f}min continuous heating "
+                        f"(cap={max_continuous:.0f}min, contended={self._floor_is_contended(floor, len(demand_rooms))})"
+                    )
                 # Always exclude rooms that exceeded max heating time
                 continue
 
@@ -872,17 +959,8 @@ class HeatOrchestrator(hass.Hass):
 
         candidates.sort(key=sort_key)
 
-        # Use LERP to determine max rooms
-        t_out = self._get_outdoor_temp()
-        max_rooms_lerp = self._lerp_max_rooms(t_out)
-
-        # Clamp to floor room count
-        rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
-        max_rooms_for_floor = len(rooms)
-        max_rooms = min(max_rooms_lerp, max_rooms_for_floor)
-
-        # Clamp to candidate count
-        max_rooms = min(max_rooms, len(candidates))
+        # LERP room limit, clamped to the floor size and the candidate count
+        max_rooms = min(self._max_rooms_for_floor(floor), len(candidates))
 
         return candidates[:max_rooms]
 
@@ -893,10 +971,11 @@ class HeatOrchestrator(hass.Hass):
         self._set_number("input_number.pump_on_minutes_today", 0)
         self._set_number("input_number.pump_starts_today", 0)
 
-        # Clear all cooldown states and heating minute counters
+        # Clear all cooldown states, resume latches and heating minute counters
         for room in ALL_ROOMS:
             self.room_cooldown_until[room] = None
             self._reset_heating_minutes(room)
+        self._clear_resume_pending()
 
         self.log("[RESET] Daily counters zeroed, cooldown states and heating minutes cleared")
 
@@ -948,6 +1027,11 @@ class HeatOrchestrator(hass.Hass):
                 # the TRV (open valve, misleading display) until the next
                 # state transition.
                 self._disable_all_rooms()
+            # The off window is hours long. A resume latch set just before it
+            # would be stale by morning and would restart the pump for a room
+            # sitting inside the hysteresis band, so the night clears it and
+            # rooms re-qualify on the normal onset threshold.
+            self._clear_resume_pending()
             return
 
         # --- 2. Compute demand and quota ---
@@ -1065,13 +1149,47 @@ class HeatOrchestrator(hass.Hass):
                         active_floor = other_floor
 
             new_state = STATE_HEAT_GF if active_floor == "GF" else STATE_HEAT_FF
-            self._apply_floor(active_floor)
+            selected = self._apply_floor(active_floor)
+
+            if not selected:
+                # Demand exists but every candidate is in cooldown, on both
+                # floors: the pump would otherwise keep running against closed
+                # valves (all TRVs parked at room_off_setpoint) for the whole
+                # cooldown, producing nothing. Put the run to work on DHW if
+                # there is quota left, otherwise stop it.
+                other_floor = "FF" if active_floor == "GF" else "GF"
+                if not self._has_selectable_rooms(other_floor):
+                    if remaining_quota > 0:
+                        if current_state != STATE_DHW_QUOTA:
+                            self._set_fsm_state(STATE_DHW_QUOTA)
+                            self.log(
+                                f"[DECISION] state=DHW_QUOTA reason=no_selectable_rooms "
+                                f"floor={active_floor} quota_remaining={remaining_quota:.0f}"
+                            )
+                        self._update_diagnostics()
+                        return
+                    mins_on = self._minutes_since("input_datetime.last_pump_on")
+                    if mins_on is not None and mins_on >= self.min_pump_on:
+                        self._pump_off()
+                        self._set_fsm_state(STATE_OFF)
+                        self.log(
+                            f"[DECISION] state=OFF reason=no_selectable_rooms "
+                            f"floor={active_floor} quota_remaining={remaining_quota:.0f} pump_off"
+                        )
+                        self._update_diagnostics()
+                        return
+                    if self._tick_counter % self._log_every_n_ticks == 0:
+                        mins_on_str = f"{mins_on:.0f}" if mins_on is not None else "unknown"
+                        self.log(
+                            f"[DECISION] state={current_state} no_selectable_rooms "
+                            f"but waiting for min_pump_on "
+                            f"({mins_on_str}/{self.min_pump_on:.0f} min)"
+                        )
 
             if current_state != new_state:
                 self._set_fsm_state(new_state)
 
             if self._tick_counter % self._log_every_n_ticks == 0:
-                selected = self._select_rooms(active_floor)
                 self.log(
                     f"[DECISION] state={new_state} floor={active_floor} "
                     f"rooms={selected} Tout={t_out:.1f} "
@@ -1140,7 +1258,8 @@ class HeatOrchestrator(hass.Hass):
     # -----------------------------------------------------------------------
     # Apply floor selection (enable selected rooms, disable rest)
     # -----------------------------------------------------------------------
-    def _apply_floor(self, floor: str):
+    def _apply_floor(self, floor: str) -> list[str]:
+        """Drive the TRVs for the given floor. Returns the selected rooms."""
         active_rooms = GF_ROOMS if floor == "GF" else FF_ROOMS
         inactive_rooms = FF_ROOMS if floor == "GF" else GF_ROOMS
 
@@ -1149,15 +1268,27 @@ class HeatOrchestrator(hass.Hass):
         for room in active_rooms:
             if room in selected:
                 self._enable_room(room)
+                self._clear_resume_pending(room)
             else:
+                # Demand evaluated *before* the room is switched off, while the
+                # heating flag still reads "on": a room dropped here wanted heat
+                # and is being interrupted, not satisfied.
+                if self._has_demand(room):
+                    self._mark_resume_pending(room)
                 self._disable_room(room)
 
         for room in inactive_rooms:
+            if self._has_demand(room):
+                self._mark_resume_pending(room)
             self._disable_room(room)
             self._reset_heating_minutes(room)
 
+        return selected
+
     def _disable_all_rooms(self):
         for room in ALL_ROOMS:
+            if self._has_demand(room):
+                self._mark_resume_pending(room)
             self._disable_room(room)
             self._reset_heating_minutes(room)
 

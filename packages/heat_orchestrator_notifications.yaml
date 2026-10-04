@@ -81,11 +81,11 @@ automation:
             pokoj_z_garazem: "Pokój z garażem"
           state_labels:
             # Quoted: unquoted OFF is a YAML 1.1 boolean.
-            "OFF": "off"
-            "OFF_LOCKOUT": "night pause"
-            "DHW_QUOTA": "hot water"
-            "HEAT_GF": "ground floor"
-            "HEAT_FF": "first floor"
+            "OFF": "wyłączone"
+            "OFF_LOCKOUT": "przerwa nocna"
+            "DHW_QUOTA": "ciepła woda (CWU)"
+            "HEAT_GF": "parter"
+            "HEAT_FF": "piętro"
           heat_state: "{{ states('input_text.heat_state') }}"
           prev_state: >
             {{ trigger.from_state.state if trigger.id == 'state' else heat_state }}
@@ -95,7 +95,7 @@ automation:
               {% set t = state_attr('climate.' ~ key, 'current_temperature') %}
               {% set sp = states('input_number.user_sp_' ~ key) %}
               {% if t is number and sp | is_number %}
-                {% set ns.out = ns.out + [name ~ ' (' ~ t ~ ' → ' ~ (sp | float | round(1)) ~ ' °C)'] %}
+                {% set ns.out = ns.out + [name ~ ' (' ~ ('%.1f' | format(t) | replace('.', ',')) ~ ' → ' ~ ('%.1f' | format(sp | float) | replace('.', ',')) ~ ' °C)'] %}
               {% else %}
                 {% set ns.out = ns.out + [name] %}
               {% endif %}
@@ -108,7 +108,7 @@ automation:
               {% set t = state_attr('climate.' ~ key, 'current_temperature') %}
               {% set sp = states('input_number.user_sp_' ~ key) %}
               {% if t is number and sp | is_number and t < (sp | float) - hyst %}
-                {% set ns.out = ns.out + [name ~ ' (' ~ t ~ ' → ' ~ (sp | float | round(1)) ~ ' °C)'] %}
+                {% set ns.out = ns.out + [name ~ ' (' ~ ('%.1f' | format(t) | replace('.', ',')) ~ ' → ' ~ ('%.1f' | format(sp | float) | replace('.', ',')) ~ ' °C)'] %}
               {% endif %}
             {% endfor %}
             {{ ns.out | join(', ') }}
@@ -117,40 +117,40 @@ automation:
                  - states('input_number.pump_on_minutes_today') | float(0), 0 ] | max | round(0) | int }}
           outdoor: >
             {% set t = state_attr('weather.forecast_home', 'temperature') %}
-            {{ 'Outside: ' ~ t ~ ' °C.' if t is number else '' }}
+            {{ 'Na zewnątrz: ' ~ ('%.1f' | format(t) | replace('.', ',')) ~ ' °C.' if t is number else '' }}
           prev_note: >
-            {{ 'Previously: ' ~ state_labels.get(prev_state, prev_state) ~ '.'
+            {{ 'Wcześniej: ' ~ state_labels.get(prev_state, prev_state) ~ '.'
                if trigger.id == 'state' else '' }}
           title: >-
-            {%- if heat_state == 'HEAT_GF' -%} 🔥 Heating ground floor
-            {%- elif heat_state == 'HEAT_FF' -%} 🔥 Heating first floor
-            {%- elif heat_state == 'DHW_QUOTA' -%} 💧 Hot water mode
-            {%- elif heat_state == 'OFF_LOCKOUT' -%} 🌙 Heating night pause
-            {%- elif heat_state == 'OFF' -%} ⏸️ Heating off
-            {%- else -%} Heating: {{ heat_state }}
+            {%- if heat_state == 'HEAT_GF' -%} 🔥 Grzanie: parter
+            {%- elif heat_state == 'HEAT_FF' -%} 🔥 Grzanie: piętro
+            {%- elif heat_state == 'DHW_QUOTA' -%} 💧 Tryb ciepłej wody (CWU)
+            {%- elif heat_state == 'OFF_LOCKOUT' -%} 🌙 Nocna przerwa ogrzewania
+            {%- elif heat_state == 'OFF' -%} ⏸️ Ogrzewanie wyłączone
+            {%- else -%} Ogrzewanie: {{ heat_state }}
             {%- endif -%}
           message: >-
             {%- if heat_state in ['HEAT_GF', 'HEAT_FF'] -%}
-              {{ 'Rooms changed. ' if trigger.id == 'room' else '' }}
+              {{ 'Zmiana pomieszczeń. ' if trigger.id == 'room' else '' }}
               {%- if heated_rooms -%}
-                Now heating: {{ heated_rooms }}.
+                Grzane: {{ heated_rooms }}.
               {%- else -%}
-                Pump is running but every room on this floor is in its cooldown, valves closed.
+                Pompa pracuje, ale wszystkie pomieszczenia na tej kondygnacji mają przerwę, zawory zamknięte.
               {%- endif -%}
             {%- elif heat_state == 'DHW_QUOTA' -%}
-              Room valves closed, pump runs for the daily hot water minimum ({{ quota_left }} min left today).
+              Zawory w pomieszczeniach zamknięte, pompa grzeje ciepłą wodę na dzienne minimum (zostało {{ quota_left }} min).
             {%- elif heat_state == 'OFF_LOCKOUT' -%}
-              Night off window active, heating resumes at {{ states('input_datetime.off_window_end')[:5] }}.
+              Nocne okno wyłączenia, ogrzewanie wróci o {{ states('input_datetime.off_window_end')[:5] }}.
             {%- elif heat_state == 'OFF' -%}
               {%- if waiting_rooms -%}
-                Pump stopped (cooldown or pause). Waiting for heat: {{ waiting_rooms }}.
+                Pompa zatrzymana (przerwa ochronna lub pauza). Czekają na grzanie: {{ waiting_rooms }}.
               {%- elif quota_left | int > 0 -%}
-                All rooms at target. Hot water minimum left today: {{ quota_left }} min.
+                Wszystkie pomieszczenia mają zadaną temperaturę. Pozostałe dzienne minimum CWU: {{ quota_left }} min.
               {%- else -%}
-                All rooms at target and today's hot water minimum is done.
+                Wszystkie pomieszczenia mają zadaną temperaturę, dzienne minimum CWU zrealizowane.
               {%- endif -%}
             {%- else -%}
-              State changed to {{ heat_state }}.
+              Zmiana stanu na {{ heat_state }}.
             {%- endif -%}
             {{ (' ' ~ outdoor) if outdoor }}{{ (' ' ~ prev_note) if prev_note }}
           targets: >
@@ -172,4 +172,4 @@ automation:
                 message: "{{ message }}"
                 data:
                   group: heat_orchestrator
-                  channel: Heating
+                  channel: Ogrzewanie

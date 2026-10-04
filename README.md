@@ -37,7 +37,8 @@ This system controls a heat pump powering underfloor heating across two manifold
 │       └── apps.yaml              # AppDaemon app registration
 ├── packages/
 │   ├── heat_orchestrator_helpers.yaml           # HA helpers (61 entities)
-│   └── heat_orchestrator_dashboard_sensors.yaml # Template sensors for graphs
+│   ├── heat_orchestrator_dashboard_sensors.yaml # Template sensors for graphs
+│   └── heat_orchestrator_notifications.yaml     # Companion app push on state/room changes
 ├── tests/
 │   └── test_heat_orchestrator_sim.py  # Minute-by-minute simulation (stubbed hassapi, pytest)
 ├── dashboards/

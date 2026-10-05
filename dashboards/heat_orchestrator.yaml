@@ -177,7 +177,28 @@ views:
           - entity: input_boolean.heating_pokoj_z_garazem
             name: Z garażem
       - type: entities
-        title: Heating minutes today
+        title: Heating time today (h)
+        entities:
+          - entity: sensor.ho_heating_today_gabinet_ani
+            name: Gabinet Ani
+          - entity: sensor.ho_heating_today_lazienka_parter
+            name: Łazienka Parter
+          - entity: sensor.ho_heating_today_salon
+            name: Salon
+          - entity: sensor.ho_heating_today_garaz
+            name: Garaż
+          - entity: sensor.ho_heating_today_sypialnia
+            name: Sypialnia
+          - entity: sensor.ho_heating_today_lazienka_pietro
+            name: Łazienka Piętro
+          - entity: sensor.ho_heating_today_pokoj_narozny
+            name: Pokój narożny
+          - entity: sensor.ho_heating_today_pokoj_z_garazem
+            name: Pokój z garażem
+      # heating_minutes_* is the app's continuous-session counter for the
+      # rotation cap (zeroed on floor switch / cooldown), not a daily total.
+      - type: entities
+        title: Current heating session (min, cap counter)
         entities:
           - type: simple-entity
             entity: input_number.heating_minutes_gabinet_ani
@@ -258,7 +279,7 @@ views:
             entities:
               - entity: sensor.ho_outdoor_temp
               - entity: sensor.ho_avg_room_temp
-            hours_to_show: 336
+            hours_to_show: 720
             show_names: false
             min_y_axis: -20
             max_y_axis: 40
@@ -388,3 +409,133 @@ views:
               - entity: input_number.user_sp_pokoj_z_garazem
                 name: User SP
         column_span: 4
+  - title: All Data
+    path: all-data
+    icon: mdi:database-export
+    panel: true
+    cards:
+      - type: history-graph
+        title: Heat Orchestrator – all data
+        hours_to_show: 24
+        entities:
+          # ===== Orchestrator state (input_text, written by AppDaemon) =====
+          - entity: input_text.heat_state
+          - entity: input_datetime.state_since
+          - entity: input_text.pump_health
+          - entity: input_text.active_floor
+          - entity: input_text.active_rooms
+          # ===== Pump =====
+          - entity: switch.zasilanie_pompy_sonoff_10017fadeb_1
+          - entity: sensor.zasilanie_pompy_sonoff_10017fadeb_power
+          - entity: input_datetime.last_pump_on
+          - entity: input_datetime.last_pump_off
+          - entity: input_number.pump_on_minutes_today
+          - entity: input_number.pump_starts_today
+          - entity: sensor.ho_dhw_quota_remaining
+          # ===== Global temps =====
+          - entity: sensor.ho_outdoor_temp
+          - entity: sensor.komfovent_outdoor_temperature
+          - entity: sensor.ho_avg_room_temp
+          # ===== Thermostats =====
+          - entity: climate.gabinet_ani
+          - entity: climate.lazienka_parter
+          - entity: climate.salon
+          - entity: climate.garaz
+          - entity: climate.sypialnia
+          - entity: climate.lazienka_pietro
+          - entity: climate.pokoj_narozny
+          - entity: climate.pokoj_z_garazem
+          # ===== Room temps =====
+          - entity: sensor.ho_temp_gabinet_ani
+          - entity: sensor.ho_temp_lazienka_parter
+          - entity: sensor.ho_temp_salon
+          - entity: sensor.ho_temp_garaz
+          - entity: sensor.ho_temp_sypialnia
+          - entity: sensor.ho_temp_lazienka_pietro
+          - entity: sensor.ho_temp_pokoj_narozny
+          - entity: sensor.ho_temp_pokoj_z_garazem
+          # ===== Room targets =====
+          - entity: sensor.ho_target_gabinet_ani
+          - entity: sensor.ho_target_lazienka_parter
+          - entity: sensor.ho_target_salon
+          - entity: sensor.ho_target_garaz
+          - entity: sensor.ho_target_sypialnia
+          - entity: sensor.ho_target_lazienka_pietro
+          - entity: sensor.ho_target_pokoj_narozny
+          - entity: sensor.ho_target_pokoj_z_garazem
+          # ===== Room deltas =====
+          - entity: sensor.ho_delta_gabinet_ani
+          - entity: sensor.ho_delta_lazienka_parter
+          - entity: sensor.ho_delta_salon
+          - entity: sensor.ho_delta_garaz
+          - entity: sensor.ho_delta_sypialnia
+          - entity: sensor.ho_delta_lazienka_pietro
+          - entity: sensor.ho_delta_pokoj_narozny
+          - entity: sensor.ho_delta_pokoj_z_garazem
+          # ===== Room heating flags =====
+          - entity: input_boolean.heating_gabinet_ani
+          - entity: input_boolean.heating_lazienka_parter
+          - entity: input_boolean.heating_salon
+          - entity: input_boolean.heating_garaz
+          - entity: input_boolean.heating_sypialnia
+          - entity: input_boolean.heating_lazienka_pietro
+          - entity: input_boolean.heating_pokoj_narozny
+          - entity: input_boolean.heating_pokoj_z_garazem
+          # ===== Room heating minutes =====
+          - entity: input_number.heating_minutes_gabinet_ani
+          - entity: input_number.heating_minutes_lazienka_parter
+          - entity: input_number.heating_minutes_salon
+          - entity: input_number.heating_minutes_garaz
+          - entity: input_number.heating_minutes_sypialnia
+          - entity: input_number.heating_minutes_lazienka_pietro
+          - entity: input_number.heating_minutes_pokoj_narozny
+          - entity: input_number.heating_minutes_pokoj_z_garazem
+          # ===== Room heating time today (history_stats, h) =====
+          - entity: sensor.ho_heating_today_gabinet_ani
+          - entity: sensor.ho_heating_today_lazienka_parter
+          - entity: sensor.ho_heating_today_salon
+          - entity: sensor.ho_heating_today_garaz
+          - entity: sensor.ho_heating_today_sypialnia
+          - entity: sensor.ho_heating_today_lazienka_pietro
+          - entity: sensor.ho_heating_today_pokoj_narozny
+          - entity: sensor.ho_heating_today_pokoj_z_garazem
+          # ===== User setpoints =====
+          - entity: input_number.user_sp_gabinet_ani
+          - entity: input_number.user_sp_lazienka_parter
+          - entity: input_number.user_sp_salon
+          - entity: input_number.user_sp_garaz
+          - entity: input_number.user_sp_sypialnia
+          - entity: input_number.user_sp_lazienka_pietro
+          - entity: input_number.user_sp_pokoj_narozny
+          - entity: input_number.user_sp_pokoj_z_garazem
+          # ===== Priorities =====
+          - entity: input_number.priority_gabinet_ani
+          - entity: input_number.priority_lazienka_parter
+          - entity: input_number.priority_salon
+          - entity: input_number.priority_garaz
+          - entity: input_number.priority_sypialnia
+          - entity: input_number.priority_lazienka_pietro
+          - entity: input_number.priority_pokoj_narozny
+          - entity: input_number.priority_pokoj_z_garazem
+          # ===== Tuning parameters =====
+          - entity: input_number.room_off_setpoint
+          - entity: input_number.heating_hyst_on
+          - entity: input_number.heating_hyst_off
+          - entity: input_number.min_state_duration_min
+          - entity: input_number.min_pump_on_min
+          - entity: input_number.min_pump_off_min
+          - entity: input_number.dhw_min_run_hours
+          - entity: input_number.dhw_exclusive_max_run_min
+          - entity: input_number.dhw_exclusive_pause_min
+          - entity: input_number.bulk_mode_temp
+          - entity: input_number.sequential_mode_temp
+          - entity: input_number.max_rooms_limited
+          - entity: input_number.max_continuous_heating_min
+          - entity: input_number.max_continuous_heating_solo_min
+          - entity: input_number.lerp_temp_min
+          - entity: input_number.lerp_temp_max
+          - entity: input_number.lerp_rooms_min
+          - entity: input_number.lerp_rooms_max
+          - entity: input_datetime.off_window_start
+          - entity: input_datetime.off_window_end
+          - entity: input_datetime.day_reset_time

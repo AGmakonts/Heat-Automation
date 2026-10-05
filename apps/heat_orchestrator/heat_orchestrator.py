@@ -85,7 +85,12 @@ PUMP_HEALTH_MIN_WATTS = 50.0   # below this while commanded ON = suspicious
 PUMP_HEALTH_GRACE_MIN = 5.0    # ignore the first minutes after a start (spin-up)
 PUMP_STOP_SETTLE_MIN = 3.0     # after wylacz the relay may still read "on" for a tick or two
 
+# Outdoor temperature, in order of preference: the ventilation unit's intake
+# sensor (measured at this house, no internet dependency), then the Met.no
+# forecast entity. Readings outside the plausible range are sensor sentinels.
+OUTDOOR_TEMP_SENSOR = "sensor.komfovent_outdoor_temperature"
 WEATHER_ENTITY = "weather.forecast_home"
+OUTDOOR_TEMP_RANGE = (-50.0, 60.0)
 
 # FSM States
 STATE_OFF_LOCKOUT = "OFF_LOCKOUT"
@@ -117,6 +122,9 @@ class HeatOrchestrator(hass.Hass):
         self._last_outdoor_temp: float | None = None
         self._outdoor_temp_minute: datetime.datetime | None = None
         self._outdoor_temp_cached: float = 0.0
+        # Which source the last reading came from; a change is logged once
+        # instead of warning on every tick of an outage.
+        self._outdoor_temp_source: str | None = None
 
         # Pump health (power-meter cross-check) — diagnostic only, never used to
         # decide whether the pump is on. "OK" | "NO_FLOW" | "OFF" | "UNKNOWN".
@@ -387,8 +395,8 @@ class HeatOrchestrator(hass.Hass):
         """Outdoor temperature, memoised for the duration of one tick.
 
         Room selection asks for it several times per tick (room limit, both
-        floors' contention check). The attribute read is cheap, but the
-        fallback path calls weather.get_forecasts, which is not.
+        floors' contention check); memoising keeps the fallback chain and its
+        logging to one evaluation per tick.
 
         Keyed on the wall-clock minute rather than the tick counter, so a
         caller outside `_tick` (a state listener, a scheduled callback) gets a
@@ -403,41 +411,39 @@ class HeatOrchestrator(hass.Hass):
         self._outdoor_temp_cached = value
         return value
 
-    def _read_outdoor_temp(self) -> float:
-        # Try attribute first
-        temp = self.get_state(WEATHER_ENTITY, attribute="temperature")
-        if temp is not None:
-            try:
-                t = float(temp)
-                self._last_outdoor_temp = t
-                return t
-            except (ValueError, TypeError):
-                pass
-
-        # Fallback: call weather.get_forecasts
+    @staticmethod
+    def _plausible_temp(val) -> float | None:
         try:
-            resp = self.call_service(
-                "weather/get_forecasts",
-                entity_id=WEATHER_ENTITY,
-                type="hourly",
-                return_result=True,
+            t = float(val)
+        except (ValueError, TypeError):
+            return None
+        lo, hi = OUTDOOR_TEMP_RANGE
+        return t if lo <= t <= hi else None
+
+    def _read_outdoor_temp(self) -> float:
+        # No weather.get_forecasts fallback: it returns the same Met.no data
+        # as the attribute below, and HA rejected the call outright.
+        t = self._plausible_temp(self.get_state(OUTDOOR_TEMP_SENSOR))
+        source = OUTDOOR_TEMP_SENSOR
+        if t is None:
+            t = self._plausible_temp(self.get_state(WEATHER_ENTITY, attribute="temperature"))
+            source = WEATHER_ENTITY
+        if t is None:
+            if self._last_outdoor_temp is not None:
+                t, source = self._last_outdoor_temp, "last known outdoor temp"
+            else:
+                t, source = 0.0, "neutral 0°C (no outdoor temp ever read)"
+        else:
+            self._last_outdoor_temp = t
+
+        if source != self._outdoor_temp_source:
+            primary = source == OUTDOOR_TEMP_SENSOR
+            self.log(
+                f"[{'INFO' if primary else 'WARN'}] outdoor temp source → {source} ({t:.1f}°C)",
+                level="INFO" if primary else "WARNING",
             )
-            if resp and WEATHER_ENTITY in resp:
-                forecasts = resp[WEATHER_ENTITY].get("forecast", [])
-                if forecasts:
-                    t = float(forecasts[0]["temperature"])
-                    self._last_outdoor_temp = t
-                    return t
-        except Exception as e:
-            self.log(f"[WARN] weather.get_forecasts failed: {e}", level="WARNING")
-
-        # Last known or neutral
-        if self._last_outdoor_temp is not None:
-            self.log("[WARN] Using last known outdoor temp", level="WARNING")
-            return self._last_outdoor_temp
-
-        self.log("[WARN] No outdoor temp available, using 0°C", level="WARNING")
-        return 0.0
+            self._outdoor_temp_source = source
+        return t
 
     # -----------------------------------------------------------------------
     # LERP-based room count calculation

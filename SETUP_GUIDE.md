@@ -10,7 +10,7 @@
   - Pump OFF script: `script.wylacz_pompe` (graceful shutdown; must exist before starting)
   - Pump relay / run-state switch: `switch.zasilanie_pompy_sonoff_10017fadeb_1` — the `uruchom`/`wylacz` scripts toggle it; the orchestrator reads it as the authoritative pump on/off state
   - Pump power meter: `sensor.zasilanie_pompy_sonoff_10017fadeb_power` (W) — used only as a health cross-check (commanded on but no draw → pump not running)
-  - Weather: `weather.forecast_home` (Met.no integration)
+  - Outdoor temperature: `sensor.komfovent_outdoor_temperature` (ventilation unit, primary) with `weather.forecast_home` (Met.no integration) as fallback
 
 ---
 

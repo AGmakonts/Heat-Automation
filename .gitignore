@@ -31,3 +31,6 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+
+# Production logs (AppDaemon exports)
+*.log

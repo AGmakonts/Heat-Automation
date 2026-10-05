@@ -66,8 +66,9 @@ This system controls a heat pump powering underfloor heating across two manifold
 - OFF: `script.wylacz_pompe` (graceful shutdown)
 - Run-state: the relay switch `switch.zasilanie_pompy_sonoff_10017fadeb_1` — the `uruchom`/`wylacz` scripts toggle it, so it reflects the commanded on/off state within a tick (after `wylacz` the relay can still read on for one tick while the graceful shutdown runs; the orchestrator treats that as a pending stop). The power meter `sensor.zasilanie_pompy_sonoff_10017fadeb_power` is used **only** as a health cross-check: if the pump is commanded on but draws < 50 W for several minutes, it's flagged `NO_FLOW` (`input_text.pump_health`).
 
-**Weather**
-- `weather.forecast_home` (Met.no)
+**Outdoor temperature**
+- `sensor.komfovent_outdoor_temperature` — ventilation unit intake sensor (primary; measured at the house, no internet dependency)
+- `weather.forecast_home` (Met.no) — fallback when the sensor is unavailable or reports an implausible value; after that the last known reading is kept
 
 ## Quick Start
 

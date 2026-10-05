@@ -124,7 +124,7 @@ flowchart TD
 
     subgraph Inputs["Inputs"]
         TEMPS[Room temperatures\n8 climate entities]
-        WEATHER[Outdoor temperature\nweather.forecast_home]
+        WEATHER[Outdoor temperature\nkomfovent sensor\n→ weather.forecast_home]
         SETPOINTS[User setpoints\nstored in helpers]
         PRIORITIES[Room priorities\n1 – 100]
         PARAMS[Parameters\nhysteresis, timers,\nLERP config]

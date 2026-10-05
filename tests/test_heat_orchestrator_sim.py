@@ -750,13 +750,47 @@ def test_thermal_cold_day_contention_still_shares_the_pump_between_floors():
     assert sim.valve_cycles("salon") <= 6, "rotation must not thrash the TRV"
 
 
-def test_outdoor_temp_is_read_once_per_tick_when_the_weather_entity_is_degraded():
-    """Room selection asks for the outdoor temperature several times per tick;
-    the fallback path calls a service, so it must be memoised."""
+def test_outdoor_temp_prefers_the_ventilation_unit_sensor():
+    """The Komfovent intake sensor measures the air outside this house; the
+    Met.no weather entity is a forecast model and only a fallback."""
     sim = Sim(start=dt.datetime(2026, 9, 18, 6, 0, 0))
-    sim.app.set(sim.mod.WEATHER_ENTITY, "unavailable", temperature=None)
-    _demand(sim, "salon", 22.0)
+    sim.app.set(sim.mod.OUTDOOR_TEMP_SENSOR, "3.4")
+    sim.app.set(sim.mod.WEATHER_ENTITY, "sunny", temperature=20.0)
 
+    assert sim.app._get_outdoor_temp() == 3.4
+
+
+def test_outdoor_temp_falls_back_to_the_weather_entity():
+    sim = Sim(start=dt.datetime(2026, 9, 18, 6, 0, 0))
+    sim.app.set(sim.mod.OUTDOOR_TEMP_SENSOR, "unavailable")
+    sim.app.set(sim.mod.WEATHER_ENTITY, "sunny", temperature=11.0)
+
+    assert sim.app._get_outdoor_temp() == 11.0
+
+
+def test_outdoor_temp_ignores_an_implausible_sensor_reading():
+    """Ventilation units report sentinel values (e.g. -3276.8) on a sensor
+    fault; treat those like unavailable instead of heating for -3000 °C."""
+    sim = Sim(start=dt.datetime(2026, 9, 18, 6, 0, 0))
+    sim.app.set(sim.mod.OUTDOOR_TEMP_SENSOR, "-3276.8")
+    sim.app.set(sim.mod.WEATHER_ENTITY, "sunny", temperature=11.0)
+
+    assert sim.app._get_outdoor_temp() == 11.0
+
+
+def test_outdoor_temp_outage_uses_last_known_without_service_calls_or_log_spam():
+    """With both sources down the app keeps the last reading. It must not call
+    weather.get_forecasts (rejected by HA: 55 errors in production on
+    2026-09-21) and must not log a warning every tick."""
+    sim = Sim(start=dt.datetime(2026, 9, 18, 6, 0, 0))
+    sim.app.set(sim.mod.OUTDOOR_TEMP_SENSOR, "5.0")
+    _demand(sim, "salon", 22.0)
+    sim.step(1)
+
+    sim.app.set(sim.mod.OUTDOOR_TEMP_SENSOR, "unavailable")
+    sim.app.set(sim.mod.WEATHER_ENTITY, "unavailable", temperature=None)
     sim.step(10)
 
-    assert len(sim.calls("weather/get_forecasts")) == 10
+    assert sim.app._get_outdoor_temp() == 5.0
+    assert sim.calls("weather/get_forecasts") == []
+    assert len(sim.log_lines("last known outdoor temp")) == 1

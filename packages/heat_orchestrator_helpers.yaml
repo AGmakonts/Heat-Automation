@@ -209,7 +209,7 @@ input_number:
     min: 0
     max: 12
     step: 0.5
-    initial: 3.5
+    initial: 2.5
     unit_of_measurement: "h"
     icon: mdi:water-boiler
 
@@ -218,7 +218,6 @@ input_number:
     min: 0
     max: 1440
     step: 1
-    initial: 0
     unit_of_measurement: "min"
     icon: mdi:counter
 
@@ -308,7 +307,6 @@ input_number:
     min: 0
     max: 1440
     step: 1
-    initial: 0
     unit_of_measurement: "min"
     icon: mdi:timer-sand
 
@@ -317,7 +315,6 @@ input_number:
     min: 0
     max: 1440
     step: 1
-    initial: 0
     unit_of_measurement: "min"
     icon: mdi:timer-sand
 
@@ -326,7 +323,6 @@ input_number:
     min: 0
     max: 1440
     step: 1
-    initial: 0
     unit_of_measurement: "min"
     icon: mdi:timer-sand
 
@@ -335,7 +331,6 @@ input_number:
     min: 0
     max: 1440
     step: 1
-    initial: 0
     unit_of_measurement: "min"
     icon: mdi:timer-sand
 
@@ -344,7 +339,6 @@ input_number:
     min: 0
     max: 1440
     step: 1
-    initial: 0
     unit_of_measurement: "min"
     icon: mdi:timer-sand
 
@@ -353,7 +347,6 @@ input_number:
     min: 0
     max: 1440
     step: 1
-    initial: 0
     unit_of_measurement: "min"
     icon: mdi:timer-sand
 
@@ -362,7 +355,6 @@ input_number:
     min: 0
     max: 1440
     step: 1
-    initial: 0
     unit_of_measurement: "min"
     icon: mdi:timer-sand
 
@@ -371,7 +363,6 @@ input_number:
     min: 0
     max: 1440
     step: 1
-    initial: 0
     unit_of_measurement: "min"
     icon: mdi:timer-sand
 
@@ -420,7 +411,6 @@ input_number:
     min: 0
     max: 100
     step: 1
-    initial: 0
     icon: mdi:counter
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,8 @@
 # Names are intentionally ASCII so the auto-generated entity IDs are
 # deterministic: sensor.ho_temp_<room>, sensor.ho_target_<room>,
 # sensor.ho_delta_<room>, sensor.ho_dhw_quota_remaining,
-# sensor.ho_outdoor_temp, sensor.ho_avg_room_temp. Friendly (Polish)
+# sensor.ho_outdoor_temp, sensor.ho_avg_room_temp,
+# sensor.ho_heating_today_<room> (history_stats, hours). Friendly (Polish)
 # labels are applied in the dashboard, not here.
 # =============================================================================
 template:
@@ -216,14 +217,22 @@ template:
           {{ (state_attr('climate.pokoj_z_garazem','current_temperature')
               - states('input_number.user_sp_pokoj_z_garazem')|float) | round(2) }}
 
-      # ===== Outdoor temperature (weather entity attribute) =====
-      # Same source the orchestrator's _get_outdoor_temp() reads first.
+      # ===== Outdoor temperature =====
+      # Same source order as the orchestrator's _read_outdoor_temp():
+      # ventilation unit intake sensor, then the Met.no weather attribute.
+      # Readings outside -50..60 °C are sensor sentinels and are skipped.
       - name: "HO Outdoor Temp"
         unique_id: ho_outdoor_temp
         unit_of_measurement: "°C"
         device_class: temperature
-        availability: "{{ state_attr('weather.forecast_home','temperature') is not none }}"
-        state: "{{ state_attr('weather.forecast_home','temperature') }}"
+        availability: >
+          {% set k = states('sensor.komfovent_outdoor_temperature') | float(none) %}
+          {% set w = state_attr('weather.forecast_home','temperature') | float(none) %}
+          {{ (k is not none and -50 <= k <= 60) or (w is not none and -50 <= w <= 60) }}
+        state: >
+          {% set k = states('sensor.komfovent_outdoor_temperature') | float(none) %}
+          {% set w = state_attr('weather.forecast_home','temperature') | float(none) %}
+          {{ k if (k is not none and -50 <= k <= 60) else w }}
 
       # ===== Remaining DHW quota for today =====
       - name: "HO DHW Quota Remaining"
@@ -233,3 +242,74 @@ template:
         state: >
           {{ [ (states('input_number.dhw_min_run_hours')|float(0) * 60)
                - states('input_number.pump_on_minutes_today')|float(0), 0 ] | max | round(0) }}
+
+# ===== Heating time today per room (hours) =====
+# Total time each room's heating flag was on since midnight. Unlike
+# input_number.heating_minutes_* (the app's *continuous-session* counter used
+# for the rotation cap, zeroed on every floor switch), this never resets
+# during the day.
+sensor:
+  - platform: history_stats
+    name: "HO Heating Today Gabinet Ani"
+    unique_id: ho_heating_today_gabinet_ani
+    entity_id: input_boolean.heating_gabinet_ani
+    state: "on"
+    type: time
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"
+  - platform: history_stats
+    name: "HO Heating Today Lazienka Parter"
+    unique_id: ho_heating_today_lazienka_parter
+    entity_id: input_boolean.heating_lazienka_parter
+    state: "on"
+    type: time
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"
+  - platform: history_stats
+    name: "HO Heating Today Salon"
+    unique_id: ho_heating_today_salon
+    entity_id: input_boolean.heating_salon
+    state: "on"
+    type: time
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"
+  - platform: history_stats
+    name: "HO Heating Today Garaz"
+    unique_id: ho_heating_today_garaz
+    entity_id: input_boolean.heating_garaz
+    state: "on"
+    type: time
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"
+  - platform: history_stats
+    name: "HO Heating Today Sypialnia"
+    unique_id: ho_heating_today_sypialnia
+    entity_id: input_boolean.heating_sypialnia
+    state: "on"
+    type: time
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"
+  - platform: history_stats
+    name: "HO Heating Today Lazienka Pietro"
+    unique_id: ho_heating_today_lazienka_pietro
+    entity_id: input_boolean.heating_lazienka_pietro
+    state: "on"
+    type: time
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"
+  - platform: history_stats
+    name: "HO Heating Today Pokoj Narozny"
+    unique_id: ho_heating_today_pokoj_narozny
+    entity_id: input_boolean.heating_pokoj_narozny
+    state: "on"
+    type: time
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"
+  - platform: history_stats
+    name: "HO Heating Today Pokoj Z Garazem"
+    unique_id: ho_heating_today_pokoj_z_garazem
+    entity_id: input_boolean.heating_pokoj_z_garazem
+    state: "on"
+    type: time
+    start: "{{ today_at() }}"
+    end: "{{ now() }}"

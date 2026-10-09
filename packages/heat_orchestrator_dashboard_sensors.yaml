@@ -23,7 +23,10 @@
 # `state_class: measurement` makes HA keep hourly long-term statistics for
 # these sensors (never purged). History graphs longer than the recorder
 # retention (purge_keep_days, default 10 days) are backfilled from them;
-# without it, every graph stops at the retention window.
+# without it, every graph stops at the retention window. Statistics are
+# compiled only from the moment state_class is present (after a template
+# reload / restart); states already purged are not backfilled, so a
+# 30-day graph grows one day per day until the window is full.
 # =============================================================================
 template:
   - sensor:

@@ -12,6 +12,7 @@ This system controls a heat pump powering underfloor heating across two manifold
 - **Smart room selection** — prioritizes rooms by temperature deficit × user-defined priority
 - **Outdoor-temperature room scaling** — linearly interpolates (LERP) the number of simultaneously heated rooms between a configured min and max as the outdoor temperature falls and rises
 - **User setpoint memory** — remembers manual thermostat adjustments even when rooms are temporarily disabled
+- **Thermostat mode guard** — a selected room's TRV is forced back to `hvac_mode: heat` on every tick, so a thermostat switched `off` by its physical button cannot silently ignore the orchestrator
 - **DHW quota** — ensures the pump runs a configurable minimum daily hours for hot water
 - **DHW duty-cycling** — when hot water is the only reason the pump runs (no room demand), quota runs are capped at a max duration and separated by a pause, spreading water heating across the day
 - **Nightly off-window** — enforces a pump-off period (default 01:00–06:00)

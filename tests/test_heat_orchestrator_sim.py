@@ -95,6 +95,8 @@ class FakeHass:
             self.set(entity, "off")
         elif service == "climate/set_temperature":
             self.set(entity, self.get_state(entity), temperature=kwargs["temperature"])
+        elif service == "climate/set_hvac_mode":
+            self.set(entity, kwargs["hvac_mode"])
         elif service == "script/turn_on":
             target = "on" if entity.endswith("uruchom_pompe") else "off"
             if self._pending_relay and self._pending_relay[0] == target:
@@ -606,6 +608,75 @@ def test_rooms_come_back_after_cooldown_without_a_pump_restart_penalty():
     assert sim.state() == "HEAT_GF"
     assert sim.app.get_state("input_number.pump_starts_today") == starts_before, \
         "a rotation gap must not cost a compressor start"
+
+
+# ---------------------------------------------------------------------------
+# TRV hvac_mode enforcement: a thermostat in `off` ignores its setpoint
+# ---------------------------------------------------------------------------
+def _first_index(sim: Sim, service: str, entity: str) -> int:
+    return next(
+        i for i, c in enumerate(sim.app.calls)
+        if c[0] == service and c[1].get("entity_id") == entity
+    )
+
+
+def test_enable_room_switches_an_off_thermostat_to_heat_before_the_setpoint():
+    sim = Sim()
+    room = sim.mod.ROOMS["salon"]
+    sim.app.set(room.climate, "off", current_temperature=18.0)  # demand, TRV off
+    sim.step(1)
+
+    assert sim.state() == "HEAT_GF"
+    modes = sim.calls("climate/set_hvac_mode", room.climate)
+    assert modes and modes[-1][1]["hvac_mode"] == "heat"
+    assert sim.app.get_state(room.climate) == "heat"
+    assert sim.app.get_state(room.heating) == "on"
+    assert _first_index(sim, "climate/set_hvac_mode", room.climate) < \
+        _first_index(sim, "climate/set_temperature", room.climate), \
+        "mode must be fixed before the setpoint is written"
+
+
+def test_thermostat_turned_off_mid_session_is_put_back_to_heat_next_tick():
+    sim = Sim()
+    room = sim.mod.ROOMS["salon"]
+    sim.app.set(room.climate, "heat", current_temperature=18.0)
+    sim.step(5)
+    assert sim.state() == "HEAT_GF"
+    assert sim.app.get_state(room.heating) == "on"
+    assert sim.calls("climate/set_hvac_mode") == [], "no mode commands while already in heat"
+    sp_before = len(sim.calls("climate/set_temperature", room.climate))
+
+    sim.app.set(room.climate, "off")  # physical button press; setpoint untouched
+    sim.step(1)
+
+    modes = sim.calls("climate/set_hvac_mode", room.climate)
+    assert len(modes) == 1 and modes[0][1]["hvac_mode"] == "heat"
+    assert sim.app.get_state(room.climate) == "heat"
+    assert len(sim.calls("climate/set_temperature", room.climate)) == sp_before, \
+        "setpoint was already correct; only the mode needed fixing"
+    assert sim.app.get_state(room.heating) == "on"
+    assert sim.log_lines("thermostat was 'off'")
+
+    sim.step(10)
+    assert len(sim.calls("climate/set_hvac_mode")) == 1, "no re-sends once back in heat"
+
+
+def test_parked_rooms_are_not_sent_hvac_mode_commands():
+    sim = Sim()
+    _quota_done(sim)
+    for key, room in sim.mod.ROOMS.items():
+        sim.app.set(room.climate, "off")  # warm rooms, no demand, TRVs off
+    sim.step(5)
+    assert sim.state() == "OFF"
+    assert sim.calls("climate/set_hvac_mode") == []
+
+
+def test_offline_thermostat_is_not_sent_hvac_mode_commands():
+    sim = Sim()
+    room = sim.mod.ROOMS["salon"]
+    sim.app.set(room.climate, "unavailable", current_temperature=18.0)
+    sim.step(3)
+    assert sim.calls("climate/set_hvac_mode", room.climate) == []
 
 
 # ---------------------------------------------------------------------------

@@ -100,6 +100,7 @@ STATE_HEAT_FF = "HEAT_FF"
 STATE_DHW_QUOTA = "DHW_QUOTA"
 
 GUARD_RELEASE_DELAY = 2  # seconds
+HVAC_MODE_HEAT = "heat"  # the only TRV mode in which the setpoint drives the valve
 
 
 class HeatOrchestrator(hass.Hass):
@@ -226,6 +227,14 @@ class HeatOrchestrator(hass.Hass):
             return float(val)
         except (ValueError, TypeError):
             return None
+
+    def _get_climate_hvac_mode(self, room: str) -> str | None:
+        """The TRV's hvac_mode (= the climate entity's state). None when the
+        device is offline or the state is unknown."""
+        val = self.get_state(ROOMS[room].climate)
+        if val in (None, "unknown", "unavailable", ""):
+            return None
+        return str(val)
 
     def _pump_is_on(self) -> bool:
         """Authoritative pump state = the Sonoff relay (mains) switch.
@@ -629,9 +638,21 @@ class HeatOrchestrator(hass.Hass):
         target_sp = min(30.0, t_user + self.THERMOSTAT_OVERSHOOT)
 
         entity = ROOMS[room].climate
+
+        # The setpoint only drives the valve while the TRV is in `heat`. A
+        # touch of the physical button switches it to `off`, after which it
+        # ignores the setpoint and keeps the valve closed while the
+        # orchestrator still believes the room is heating. Checked on every
+        # tick (this runs each tick for a selected room), so a mid-session
+        # button press is undone within a minute. Done before the setpoint
+        # write: some TRVs drop setpoint commands while off.
+        mode_commanded = self._ensure_heat_mode(room)
+
         current_sp = self._get_climate_setpoint(room)
         if current_sp is not None and abs(current_sp - target_sp) < 0.05:
             self._set_heating_sensor(room, True)
+            if mode_commanded:
+                self.run_in(self._release_guard, GUARD_RELEASE_DELAY, room=room)
             return  # already correct
 
         self.automation_guard[room] = True
@@ -654,6 +675,38 @@ class HeatOrchestrator(hass.Hass):
                 self.unmanaged_rooms[room] = self.datetime()
 
         self.run_in(self._release_guard, GUARD_RELEASE_DELAY, room=room)
+
+    def _ensure_heat_mode(self, room: str) -> bool:
+        """Switch the TRV to hvac_mode `heat` if it reports any other mode.
+
+        Returns True when a mode command was issued (the caller must then
+        release the automation guard, which is raised here because some TRVs
+        re-publish their setpoint on a mode change and that must not be
+        recorded as a user action). An offline/unknown TRV is left alone.
+        """
+        mode = self._get_climate_hvac_mode(room)
+        if mode is None or mode == HVAC_MODE_HEAT:
+            return False
+
+        entity = ROOMS[room].climate
+        self.automation_guard[room] = True
+        try:
+            self.call_service(
+                "climate/set_hvac_mode", entity_id=entity, hvac_mode=HVAC_MODE_HEAT
+            )
+            self.log(f"[ROOM] {room} thermostat was '{mode}' → hvac_mode=heat")
+        except Exception as e:
+            self.log(f"[ERROR] set_hvac_mode {room}: {e}", level="ERROR")
+            try:
+                self.call_service(
+                    "climate/set_hvac_mode", entity_id=entity, hvac_mode=HVAC_MODE_HEAT
+                )
+            except Exception as e2:
+                self.log(
+                    f"[ERROR] set_hvac_mode {room} retry failed: {e2}", level="ERROR"
+                )
+                self.unmanaged_rooms[room] = self.datetime()
+        return True
 
     def _disable_room(self, room: str):
         entity = ROOMS[room].climate

@@ -406,6 +406,7 @@ Akcja OFF:
 - Jeśli `Tuser` nieustawione / `None`:
   - fallback: użyj bieżącego `state_attr(climate.room,"temperature")` jeśli sensowne (np. 15..30),
   - inaczej fallback stały: 21.0.
+- Jeśli `state(climate.room)` (hvac_mode) jest znany i różny od `heat`: ustaw `automation_guard[room]=True` i wywołaj `climate.set_hvac_mode(entity_id=climate.room, hvac_mode=heat)` **przed** zapisem setpointu. W trybie `off` TRV ignoruje setpoint i trzyma zawór zamknięty (np. po dotknięciu fizycznego przycisku), a orchestrator uznawałby pokój za grzany. Sprawdzane w każdym ticku dla wybranych pokoi; TRV offline/`unavailable` pomijany.
 - Ustaw `automation_guard[room]=True`.
 - `climate.set_temperature(entity_id=climate.room, temperature=min(30.0, Tuser + THERMOSTAT_OVERSHOOT))`
   - `THERMOSTAT_OVERSHOOT = 2.0°C` utrzymuje zawór TRV otwarty poza jego wewnętrzną strefą martwą (~0.5°C); orchestrator i tak decyduje o „dogrzaniu” pokoju względem niezmienionego `Tuser`.

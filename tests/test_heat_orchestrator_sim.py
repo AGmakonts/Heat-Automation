@@ -671,6 +671,25 @@ def test_parked_rooms_are_not_sent_hvac_mode_commands():
     assert sim.calls("climate/set_hvac_mode") == []
 
 
+def test_thermostat_without_heat_in_hvac_modes_is_not_commanded_and_warns_once():
+    sim = Sim()
+    room = sim.mod.ROOMS["salon"]
+    sim.app.set(room.climate, "auto", current_temperature=18.0, hvac_modes=["auto", "off"])
+    sim.step(5)
+
+    assert sim.calls("climate/set_hvac_mode", room.climate) == []
+    assert len(sim.log_lines("does not advertise hvac_mode 'heat'")) == 1
+    assert sim.calls("climate/set_temperature", room.climate), "setpoint is still driven"
+
+
+def test_thermostat_advertising_heat_is_commanded():
+    sim = Sim()
+    room = sim.mod.ROOMS["salon"]
+    sim.app.set(room.climate, "off", current_temperature=18.0, hvac_modes=["heat", "off"])
+    sim.step(1)
+    assert sim.app.get_state(room.climate) == "heat"
+
+
 def test_offline_thermostat_is_not_sent_hvac_mode_commands():
     sim = Sim()
     room = sim.mod.ROOMS["salon"]

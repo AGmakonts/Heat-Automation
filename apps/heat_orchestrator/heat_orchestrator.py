@@ -118,6 +118,7 @@ class HeatOrchestrator(hass.Hass):
 
         # Set of rooms temporarily marked as "unmanaged" after errors
         self.unmanaged_rooms: dict[str, datetime.datetime] = {}
+        self._hvac_mode_warned: set[str] = set()
 
         # Last known outdoor temperature (fallback) and the tick it was read on
         self._last_outdoor_temp: float | None = None
@@ -689,6 +690,22 @@ class HeatOrchestrator(hass.Hass):
             return False
 
         entity = ROOMS[room].climate
+
+        # Capability check: only command a mode the entity advertises. A TRV
+        # whose hvac_modes lacks `heat` (LocalTuya mapping without it) would
+        # reject the call every tick; warn once per room instead.
+        supported = self.get_state(entity, attribute="hvac_modes")
+        if isinstance(supported, (list, tuple)) and HVAC_MODE_HEAT not in supported:
+            if room not in self._hvac_mode_warned:
+                self._hvac_mode_warned.add(room)
+                self.log(
+                    f"[WARN] {room} thermostat is '{mode}' but does not advertise "
+                    f"hvac_mode 'heat' (hvac_modes={list(supported)}); cannot "
+                    f"switch it back — check the TRV / LocalTuya mode mapping",
+                    level="WARNING",
+                )
+            return False
+
         self.automation_guard[room] = True
         try:
             self.call_service(

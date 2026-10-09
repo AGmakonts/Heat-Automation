@@ -25,8 +25,11 @@
 # retention (purge_keep_days, default 10 days) are backfilled from them;
 # without it, every graph stops at the retention window. Statistics are
 # compiled only from the moment state_class is present (after a template
-# reload / restart); states already purged are not backfilled, so a
-# 30-day graph grows one day per day until the window is full.
+# reload / restart); states already purged are not backfilled. Until the
+# retention window has moved past the day state_class was added, a long
+# graph still looks exactly like purge_keep_days (the auto-purge runs at
+# 04:12, hence the ~04:13 cut-off); only after that does it start to
+# grow, one day per day, until the window is full.
 # =============================================================================
 template:
   - sensor:

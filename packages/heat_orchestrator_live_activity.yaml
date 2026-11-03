@@ -10,14 +10,16 @@
 #             after an HA restart or after iOS expires it at the 8 h mark)
 #   end     relay switch off for 30 s        → clear_notification
 #
-# What the activity shows:
-#   title          "Pompa ciepła" (fixed for the whole run – iOS limitation)
-#   message        rooms being heated (one line – iOS truncates, so the floor
-#                  is NOT repeated here), or DHW quota remaining, or
-#                  "stopping" while the graceful shutdown runs
-#   critical_text  floor + live power draw (top-right / compact Dynamic
-#                  Island); replaced by a NO_FLOW warning when flagged
-#   chronometer    live "running for" timer since the relay went on
+# What the activity shows (layout per the Companion app source, HALockScreenView):
+#   title          header line, updated on every push: the rooms being heated,
+#                  "Ciepła woda", "Zatrzymywanie pompy", "Brak przepływu!"
+#   chronometer    live "running for" timer since the relay went on. On the
+#                  Lock Screen it REPLACES `message`, which is why the rooms
+#                  live in the title.
+#   message        second line in the expanded Dynamic Island only: floor +
+#                  start time, DHW minutes left, etc.
+#   critical_text  live power draw (top-right / compact Dynamic Island);
+#                  replaced by a NO_FLOW warning when pump_health flags it
 #   progress bar   pump minutes today vs. the daily DHW quota
 #   colors/icon    per state: amber = heating GF/FF, blue = DHW quota,
 #                  grey = stopping, red = NO_FLOW
@@ -66,7 +68,6 @@ automation:
       # ---- edit these --------------------------------------------------------
       notify_target: notify.mobile_app_iphone          # your phone
       dashboard_url: /heat-orchestrator/control         # tap target (in-app path)
-      title: "Pompa ciepła"
       # ------------------------------------------------------------------------
       tag: ho_pump_run
       pump_switch: switch.zasilanie_pompy_sonoff_10017fadeb_1
@@ -160,35 +161,44 @@ automation:
               # Relay on-time drives the live "running for" chronometer.
               started_ts: >-
                 {{ as_timestamp(states[pump_switch].last_changed, now().timestamp()) | int }}
+              started_hm: "{{ started_ts | timestamp_custom('%H:%M') }}"
 
               # ---- per-state look ------------------------------------------
               # Order matters: NO_FLOW overrides whatever the FSM says.
               style: >-
                 {%- if no_flow -%}
                   {{ {'icon': 'mdi:alert-circle', 'color': '#FF5252', 'bg': '#2A0F0F',
-                      'message': '⚠︎ Brak przepływu, pompa nie pracuje',
-                      'critical': '⚠︎ brak przepływu', 'relevance': 1.0} }}
+                      'title': '⚠︎ Brak przepływu!',
+                      'message': 'pompa włączona, ale nie pracuje',
+                      'critical': power_txt, 'relevance': 1.0} }}
                 {%- elif fsm == 'HEAT_GF' -%}
                   {{ {'icon': 'mdi:home-floor-0', 'color': '#FFA726', 'bg': '#1C1208',
-                      'message': rooms_txt or 'wybieranie pokoi…',
-                      'critical': 'Parter · ' ~ power_txt, 'relevance': 0.7} }}
+                      'title': rooms_txt or 'Parter · wybieranie pokoi…',
+                      'message': 'Parter · od ' ~ started_hm,
+                      'critical': power_txt, 'relevance': 0.7} }}
                 {%- elif fsm == 'HEAT_FF' -%}
                   {{ {'icon': 'mdi:home-floor-1', 'color': '#FFA726', 'bg': '#1C1208',
-                      'message': rooms_txt or 'wybieranie pokoi…',
-                      'critical': 'Piętro · ' ~ power_txt, 'relevance': 0.7} }}
+                      'title': rooms_txt or 'Piętro · wybieranie pokoi…',
+                      'message': 'Piętro · od ' ~ started_hm,
+                      'critical': power_txt, 'relevance': 0.7} }}
                 {%- elif fsm == 'DHW_QUOTA' -%}
                   {{ {'icon': 'mdi:water-boiler', 'color': '#4FC3F7', 'bg': '#0B1620',
-                      'message': 'Ciepła woda · zostało ' ~ quota_left ~ ' min',
+                      'title': 'Ciepła woda',
+                      'message': 'do dziennej kwoty zostało ' ~ quota_left ~ ' min',
                       'critical': power_txt, 'relevance': 0.6} }}
                 {%- else -%}
                   {{ {'icon': 'mdi:pump-off', 'color': '#B0BEC5', 'bg': '#141414',
-                      'message': 'Zatrzymywanie pompy…',
+                      'title': 'Zatrzymywanie pompy…',
+                      'message': 'łagodne wyłączanie, od ' ~ started_hm,
                       'critical': power_txt, 'relevance': 0.4} }}
                 {%- endif -%}
 
           - action: "{{ notify_target }}"
             data:
-              title: "{{ title }}"
+              # header line – refreshed on every push (Companion ≥ 2026.9.2)
+              title: "{{ style.title }}"
+              # Lock Screen hides this while chronometer is on; expanded
+              # Dynamic Island shows it under the title
               message: "{{ style.message }}"
               data:
                 tag: "{{ tag }}"

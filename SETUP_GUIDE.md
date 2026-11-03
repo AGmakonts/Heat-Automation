@@ -84,6 +84,8 @@ Then create global helpers:
 | Number | `dhw_exclusive_pause_min` | 0–360 | 5 | 90 | min |
 | Number | `pump_on_minutes_today` | 0–1440 | 1 | 0 | min |
 | Number | `pump_starts_today` | 0–100 | 1 | 0 | – |
+| Number | `pump_window_max_min` | 0–1440 | 1 | 0 | min |
+| Number | `pump_window_elapsed_min` | 0–1440 | 1 | 0 | min |
 | Number | `bulk_mode_temp` ⚠️ | -20–20 | 1 | 5 | °C |
 | Number | `sequential_mode_temp` ⚠️ | -30–10 | 1 | -5 | °C |
 | Number | `max_rooms_limited` ⚠️ | 1–7 | 1 | 2 | – |

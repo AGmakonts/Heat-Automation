@@ -155,6 +155,7 @@ class Sim:
             "bulk_mode_temp": 5, "sequential_mode_temp": -5, "max_rooms_limited": 2,
             "max_continuous_heating_min": 120,
             "max_continuous_heating_solo_min": 240,
+            "pump_window_max_min": 0, "pump_window_elapsed_min": 0,
             "lerp_temp_min": -10, "lerp_temp_max": 10, "lerp_rooms_min": 1, "lerp_rooms_max": 5,
         }
         for k, v in num.items():
@@ -794,3 +795,61 @@ def test_outdoor_temp_outage_uses_last_known_without_service_calls_or_log_spam()
     assert sim.app._get_outdoor_temp() == 5.0
     assert sim.calls("weather/get_forecasts") == []
     assert len(sim.log_lines("last known outdoor temp")) == 1
+
+
+# ---------------------------------------------------------------------------
+# Run-window diagnostics (phone Live Activity progress bar)
+# ---------------------------------------------------------------------------
+def _window(sim: Sim) -> tuple[float, float]:
+    return (
+        float(sim.app.get_state("input_number.pump_window_max_min")),
+        float(sim.app.get_state("input_number.pump_window_elapsed_min")),
+    )
+
+
+def test_run_window_tracks_the_uncontended_heating_cap():
+    sim = _warm_morning()
+    sim.step(30)
+
+    assert sim.state() == "HEAT_GF"
+    w_max, w_elapsed = _window(sim)
+    assert w_max == 240, "no FF demand and slots to spare → solo cap"
+    assert 28 <= w_elapsed <= 31
+
+
+def test_run_window_uses_the_contended_cap_when_the_other_floor_waits():
+    sim = _warm_morning()
+    _demand(sim, "sypialnia", 20.6, user_sp=21.0)
+    sim.step(30)
+
+    assert sim.state() == "HEAT_GF"
+    assert _window(sim)[0] == 120
+
+
+def test_run_window_follows_the_dhw_exclusive_max_run():
+    sim = Sim()
+    assert sim.run_until(lambda: sim.state() == "DHW_QUOTA", 30)
+    sim.step(20)
+
+    w_max, w_elapsed = _window(sim)
+    assert w_max == 45
+    assert 19 <= w_elapsed <= 22
+
+
+def test_run_window_is_cut_at_the_off_window_start():
+    sim = _warm_morning()
+    sim.app.set("input_datetime.off_window_start", "07:00:00")  # 60 min ahead
+    sim.step(30)
+
+    w_max, w_elapsed = _window(sim)
+    assert 28 <= w_elapsed <= 31
+    assert 58 <= w_max <= 61, "cap (240) must be cut at the lockout start"
+
+
+def test_run_window_is_zero_while_the_pump_is_off():
+    sim = Sim()
+    sim.app.set("input_number.dhw_min_run_hours", 0)
+    sim.step(5)
+
+    assert not sim.pump_on()
+    assert _window(sim) == (0.0, 0.0)

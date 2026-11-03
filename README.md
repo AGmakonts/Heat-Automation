@@ -36,7 +36,7 @@ This system controls a heat pump powering underfloor heating across two manifold
 │       ├── heat_orchestrator.py   # AppDaemon app (FSM + control logic)
 │       └── apps.yaml              # AppDaemon app registration
 ├── packages/
-│   ├── heat_orchestrator_helpers.yaml           # HA helpers (61 entities)
+│   ├── heat_orchestrator_helpers.yaml           # HA helpers (63 entities)
 │   ├── heat_orchestrator_dashboard_sensors.yaml # Template sensors for graphs
 │   └── heat_orchestrator_live_activity.yaml     # iPhone Live Activity with pump state
 ├── tests/
@@ -132,7 +132,8 @@ INFO heat_orchestrator: === HeatOrchestrator ready ===
 `packages/heat_orchestrator_live_activity.yaml` adds an automation that shows the current pump run as a Live Activity on the iPhone Lock Screen / Dynamic Island (Companion app, HA Core 2026.7+, iOS 17.2+):
 
 - starts when the pump relay turns on, updates silently on FSM / room / health changes and every 10 minutes, ends 30 s after the relay turns off
-- shows the active floor and rooms (or DHW quota remaining), live power draw, a running timer since pump start and a progress bar of today's pump minutes vs. the DHW quota
+- shows the rooms being heated (or DHW quota remaining), live power draw, a running timer since pump start and a progress bar of the window bounding the current run: the continuous-heating cap of the active floor, or the DHW exclusive max run / quota left, both cut at the nightly off window
+- the window comes from two diagnostic helpers the app writes every tick, `input_number.pump_window_max_min` and `input_number.pump_window_elapsed_min` (add them with the updated helpers package; without them the activity simply has no bar)
 - colour-coded per state: amber = heating, blue = DHW quota, grey = stopping, red = `NO_FLOW`
 
 Copy it to `/config/packages/` and set `notify_target` to your phone's `notify.mobile_app_*` action. See the file header for details and caveats.

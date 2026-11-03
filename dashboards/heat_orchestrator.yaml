@@ -128,6 +128,10 @@ views:
             name: Active rooms
           - entity: input_datetime.state_since
             name: State since
+          - entity: input_number.pump_window_elapsed_min
+            name: Run window elapsed
+          - entity: input_number.pump_window_max_min
+            name: Run window max
       - type: entities
         title: Pump
         entities:

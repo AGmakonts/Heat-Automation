@@ -388,6 +388,22 @@ class HeatOrchestrator(hass.Hass):
         else:  # spans midnight
             return current_time >= start or current_time < end
 
+    def _minutes_to_off_window_start(self, now: datetime.datetime | None = None) -> float:
+        """Minutes until the next start of the nightly off window."""
+        if now is None:
+            now = self.datetime()
+        start_str = self.get_state("input_datetime.off_window_start")
+        try:
+            start = datetime.datetime.strptime(start_str, "%H:%M:%S").time()
+        except Exception:
+            start = datetime.time(1, 0)
+        candidate = now.replace(
+            hour=start.hour, minute=start.minute, second=start.second, microsecond=0
+        )
+        if candidate <= now:
+            candidate += datetime.timedelta(days=1)
+        return (candidate - now).total_seconds() / 60.0
+
     # -----------------------------------------------------------------------
     # Outdoor temperature
     # -----------------------------------------------------------------------
@@ -1361,6 +1377,7 @@ class HeatOrchestrator(hass.Hass):
                 )
 
             # Active rooms
+            selected: list[str] = []
             rooms_entity = "input_text.active_rooms"
             if self.entity_exists(rooms_entity):
                 if active_floor in ("GF", "FF"):
@@ -1373,5 +1390,53 @@ class HeatOrchestrator(hass.Hass):
                     entity_id=rooms_entity,
                     value=rooms_str,
                 )
+
+            # Window bounding the current pump run (for the phone Live Activity)
+            window_max, window_elapsed = self._run_window(state, active_floor, selected)
+            for entity, value in (
+                ("input_number.pump_window_max_min", window_max),
+                ("input_number.pump_window_elapsed_min", window_elapsed),
+            ):
+                if self.entity_exists(entity):
+                    value = min(float(round(value)), 1440.0)  # helper range
+                    current = self._get_number(entity)
+                    if current is None or abs(current - value) >= 1.0:
+                        self._set_number(entity, value)
         except Exception:
             pass  # Diagnostics are optional
+
+    def _run_window(
+        self, state: str, active_floor: str, selected: list[str]
+    ) -> tuple[float, float]:
+        """(max, elapsed) minutes of the window that bounds the current run.
+
+        Diagnostic only. ``max`` 0 means no known bound (pump off, or no cap).
+          HEAT_*     the continuous-heating cap that applies to the active
+                     floor right now (contended vs. uncontended) against the
+                     longest session counter among the selected rooms — i.e.
+                     how far the floor is into its rotation slot.
+          DHW_QUOTA  minutes since entering the state against the exclusive
+                     max run (when duty-cycling) and the quota still owed.
+        Every window is additionally cut at the start of the nightly off
+        window. The DHW cap is an approximation: a DHW run entered because
+        every room sits in cooldown is not bounded by the exclusive max run.
+        """
+        now = self.datetime()
+        if state in (STATE_HEAT_GF, STATE_HEAT_FF):
+            rooms = GF_ROOMS if active_floor == "GF" else FF_ROOMS
+            demand_count = sum(1 for r in rooms if self._has_demand(r))
+            cap = self._effective_max_continuous(active_floor, demand_count)
+            elapsed = max((self._get_heating_minutes(r) for r in selected), default=0.0)
+        elif state == STATE_DHW_QUOTA:
+            since = self._get_state_since()
+            elapsed = (now - since).total_seconds() / 60.0 if since is not None else 0.0
+            elapsed = max(0.0, elapsed)
+            cap = elapsed + max(0.0, self._remaining_quota())
+            if self._dhw_duty_cycle_enabled():
+                cap = min(cap, self.dhw_exclusive_max_run)
+        else:
+            return 0.0, 0.0
+
+        lockout_bound = elapsed + self._minutes_to_off_window_start(now)
+        cap = lockout_bound if cap <= 0 else min(cap, lockout_bound)
+        return cap, elapsed

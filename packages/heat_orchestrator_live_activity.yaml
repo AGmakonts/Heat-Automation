@@ -12,10 +12,11 @@
 #
 # What the activity shows:
 #   title          "Pompa ciepła" (fixed for the whole run – iOS limitation)
-#   message        floor + rooms being heated, or DHW quota progress, or
+#   message        rooms being heated (one line – iOS truncates, so the floor
+#                  is NOT repeated here), or DHW quota remaining, or
 #                  "stopping" while the graceful shutdown runs
-#   critical_text  live power draw (top-right / compact Dynamic Island);
-#                  replaced by a NO_FLOW warning when pump_health flags it
+#   critical_text  floor + live power draw (top-right / compact Dynamic
+#                  Island); replaced by a NO_FLOW warning when flagged
 #   chronometer    live "running for" timer since the relay went on
 #   progress bar   pump minutes today vs. the daily DHW quota
 #   colors/icon    per state: amber = heating GF/FF, blue = DHW quota,
@@ -169,12 +170,12 @@ automation:
                       'critical': '⚠︎ brak przepływu', 'relevance': 1.0} }}
                 {%- elif fsm == 'HEAT_GF' -%}
                   {{ {'icon': 'mdi:home-floor-0', 'color': '#FFA726', 'bg': '#1C1208',
-                      'message': 'Parter · ' ~ (rooms_txt or 'wybieranie pokoi…'),
-                      'critical': power_txt, 'relevance': 0.7} }}
+                      'message': rooms_txt or 'wybieranie pokoi…',
+                      'critical': 'Parter · ' ~ power_txt, 'relevance': 0.7} }}
                 {%- elif fsm == 'HEAT_FF' -%}
                   {{ {'icon': 'mdi:home-floor-1', 'color': '#FFA726', 'bg': '#1C1208',
-                      'message': 'Piętro · ' ~ (rooms_txt or 'wybieranie pokoi…'),
-                      'critical': power_txt, 'relevance': 0.7} }}
+                      'message': rooms_txt or 'wybieranie pokoi…',
+                      'critical': 'Piętro · ' ~ power_txt, 'relevance': 0.7} }}
                 {%- elif fsm == 'DHW_QUOTA' -%}
                   {{ {'icon': 'mdi:water-boiler', 'color': '#4FC3F7', 'bg': '#0B1620',
                       'message': 'Ciepła woda · zostało ' ~ quota_left ~ ' min',

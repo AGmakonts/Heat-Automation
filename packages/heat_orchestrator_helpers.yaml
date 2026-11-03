@@ -300,26 +300,6 @@ input_number:
     icon: mdi:timer-sand
 
   # ---------------------------------------------------------------------------
-  # Diagnostics: window bounding the current pump run (written by the app,
-  # read by the phone Live Activity). max 0 = no known bound.
-  # ---------------------------------------------------------------------------
-  pump_window_max_min:
-    name: "Pump Run Window – Max"
-    min: 0
-    max: 1440
-    step: 1
-    unit_of_measurement: "min"
-    icon: mdi:timer-outline
-
-  pump_window_elapsed_min:
-    name: "Pump Run Window – Elapsed"
-    min: 0
-    max: 1440
-    step: 1
-    unit_of_measurement: "min"
-    icon: mdi:timer-sand-complete
-
-  # ---------------------------------------------------------------------------
   # Per-room accumulated heating minutes (for max continuous heating tracking)
   # ---------------------------------------------------------------------------
   heating_minutes_gabinet_ani:

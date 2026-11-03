@@ -132,7 +132,7 @@ INFO heat_orchestrator: === HeatOrchestrator ready ===
 `packages/heat_orchestrator_live_activity.yaml` adds an automation that shows the current pump run as a Live Activity on the iPhone Lock Screen / Dynamic Island (Companion app, HA Core 2026.7+, iOS 17.2+):
 
 - starts when the pump relay turns on, updates silently on FSM / room / health changes and every 10 minutes, ends 30 s after the relay turns off
-- shows the rooms being heated (or DHW quota remaining), live power draw, a running timer since pump start and a progress bar of the current run against the latest it could end (the start of the nightly off window)
+- shows the rooms being heated (or DHW quota remaining), live power draw, a running timer since pump start and a progress bar of today's pump minutes against the allowed daily window (from the end to the start of the nightly off window)
 - colour-coded per state: amber = heating, blue = DHW quota, grey = stopping, red = `NO_FLOW`
 
 Copy it to `/config/packages/` and set `notify_target` to your phone's `notify.mobile_app_*` action. See the file header for details and caveats.

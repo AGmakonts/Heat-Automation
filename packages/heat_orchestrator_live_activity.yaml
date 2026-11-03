@@ -19,10 +19,12 @@
 #   message        second line in the expanded Dynamic Island only: floor +
 #                  start time, DHW minutes left, etc.
 #   critical_text  live power draw (top-right / compact Dynamic Island)
-#   progress bar   how far the current run is into the longest it could
-#                  possibly be: relay-on time → start of the nightly off
-#                  window (input_datetime.off_window_start). Computed here
-#                  from existing entities only; nothing in the app changes.
+#   progress bar   pump minutes today (input_number.pump_on_minutes_today)
+#                  vs. the length of the allowed daily window, i.e. from the
+#                  end to the start of the nightly off window (default
+#                  06:00 → 01:00 = 19 h). Existing entities only; nothing in
+#                  the app changes. Note the counter resets at
+#                  day_reset_time (00:00), inside the window's last hour.
 #   colors/icon    per state: amber = heating GF/FF, blue = DHW quota,
 #                  grey = stopping, red = NO_FLOW
 #
@@ -163,17 +165,22 @@ automation:
                 {{ as_timestamp(states[pump_switch].last_changed, now().timestamp()) | int }}
               started_hm: "{{ started_ts | timestamp_custom('%H:%M') }}"
 
-              # Run window: from relay-on until the nightly off window starts.
-              # The bar fills as the run approaches the lockout.
+              # Daily window: pump work today vs. the allowed hours between the
+              # end and the start of the nightly off window.
               lockout_hms: >-
                 {%- set t = states('input_datetime.off_window_start') -%}
                 {{ t if t not in ['unknown', 'unavailable', ''] else '01:00:00' }}
-              lockout_ts: >-
-                {%- set d = today_at(lockout_hms) -%}
-                {{ (d if d > now() else d + timedelta(days=1)).timestamp() | int }}
-              run_elapsed: "{{ [((now().timestamp() - started_ts) / 60) | round(0) | int, 0] | max }}"
-              window_max: "{{ run_elapsed + ((lockout_ts - now().timestamp()) / 60) | round(0) | int }}"
-              lockout_hm: "{{ lockout_hms[:5] }}"
+              release_hms: >-
+                {%- set t = states('input_datetime.off_window_end') -%}
+                {{ t if t not in ['unknown', 'unavailable', ''] else '06:00:00' }}
+              window_max: >-
+                {%- set a = release_hms.split(':') -%}
+                {%- set b = lockout_hms.split(':') -%}
+                {{ ((b[0] | int * 60 + b[1] | int) - (a[0] | int * 60 + a[1] | int)) % 1440 }}
+              day_minutes: >-
+                {{ [states('input_number.pump_on_minutes_today') | float(0) | round(0) | int, window_max] | min }}
+              day_txt: >-
+                {{ 'dziś %dh%02d z %dh' % (day_minutes // 60, day_minutes % 60, window_max // 60) }}
 
               # ---- per-state look ------------------------------------------
               # Order matters: NO_FLOW overrides whatever the FSM says.
@@ -186,22 +193,22 @@ automation:
                 {%- elif fsm == 'HEAT_GF' -%}
                   {{ {'icon': 'mdi:home-floor-0', 'color': '#FFA726', 'bg': '#1C1208',
                       'title': rooms_txt or 'Parter · wybieranie pokoi…',
-                      'message': 'Parter · od ' ~ started_hm ~ ' · blokada o ' ~ lockout_hm,
+                      'message': 'Parter · od ' ~ started_hm ~ ' · ' ~ day_txt,
                       'critical': power_txt, 'relevance': 0.7} }}
                 {%- elif fsm == 'HEAT_FF' -%}
                   {{ {'icon': 'mdi:home-floor-1', 'color': '#FFA726', 'bg': '#1C1208',
                       'title': rooms_txt or 'Piętro · wybieranie pokoi…',
-                      'message': 'Piętro · od ' ~ started_hm ~ ' · blokada o ' ~ lockout_hm,
+                      'message': 'Piętro · od ' ~ started_hm ~ ' · ' ~ day_txt,
                       'critical': power_txt, 'relevance': 0.7} }}
                 {%- elif fsm == 'DHW_QUOTA' -%}
                   {{ {'icon': 'mdi:water-boiler', 'color': '#4FC3F7', 'bg': '#0B1620',
                       'title': 'Ciepła woda',
-                      'message': 'zostało ' ~ quota_left ~ ' min do kwoty · blokada o ' ~ lockout_hm,
+                      'message': 'zostało ' ~ quota_left ~ ' min do kwoty · ' ~ day_txt,
                       'critical': power_txt, 'relevance': 0.6} }}
                 {%- else -%}
                   {{ {'icon': 'mdi:pump-off', 'color': '#B0BEC5', 'bg': '#141414',
                       'title': 'Zatrzymywanie pompy…',
-                      'message': 'łagodne wyłączanie, od ' ~ started_hm,
+                      'message': 'łagodne wyłączanie · ' ~ day_txt,
                       'critical': power_txt, 'relevance': 0.4} }}
                 {%- endif -%}
 
@@ -225,8 +232,8 @@ automation:
                 # live "running for" timer
                 chronometer: true
                 when: "{{ started_ts }}"
-                # run elapsed vs. the latest possible end (off window start)
-                progress: "{{ run_elapsed }}"
+                # pump work today vs. the allowed daily window
+                progress: "{{ day_minutes }}"
                 progress_max: "{{ window_max }}"
                 progress_bar_color: "{{ style.color }}"
                 progress_bar_direction: increasing

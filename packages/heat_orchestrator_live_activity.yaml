@@ -50,7 +50,8 @@
 #   1. List the phones in `notify_targets` – one notify.mobile_app_<device>
 #      action per iPhone, as shown in Developer tools → Actions (the slug of
 #      the device name: "iPhone (Anna) (2)" → notify.mobile_app_iphone_anna_2).
-#   2. Optionally adjust `dashboard_url` (tap target) and the room labels.
+#   2. Set `dashboard_url` to the dashboard and view a tap should open;
+#      optionally adjust the room labels.
 #   3. Test the payload in Developer tools → Actions first; iOS has a limited
 #      "push-to-start" budget, so avoid start/stop loops while testing.
 #
@@ -74,7 +75,11 @@ automation:
       notify_targets:                                   # one per iPhone
         - notify.mobile_app_iphone_adam
         - notify.mobile_app_iphone_anna_2
-      dashboard_url: /heat-orchestrator/control         # tap target (in-app path)
+      # Tap target: /<dashboard url>/<view path>. The dashboard url is the first
+      # segment of the address bar when you open it (a UI-created dashboard
+      # titled "Pompa" gets dashboard-pompa by default); "status" is the view
+      # with the Orchestrator state card.
+      dashboard_url: /dashboard-pompa/status
       # ------------------------------------------------------------------------
       tag: ho_pump_run
       pump_switch: switch.zasilanie_pompy_sonoff_10017fadeb_1

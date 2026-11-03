@@ -25,12 +25,25 @@
 # iPhone on iOS 17.2+. Keys reference:
 # https://companion.home-assistant.io/docs/notifications/live-activities/
 #
-# Install:
-#   1. Copy to /config/packages/ (same as the other packages).
-#   2. Set `notify_target` below to your phone's notify action – find it in
+# Install – two ways (pick one, NOT both):
+#
+#  A) Package (recommended, same as the other files in packages/):
+#     copy this file as-is to /config/packages/. Requires
+#       homeassistant:
+#         packages: !include_dir_named packages
+#     in configuration.yaml. The `automation:` key below is valid only here.
+#
+#  B) UI editor: Settings → Automations → Create → (⋮) Edit in YAML, then paste
+#     ONLY the automation body – everything from `alias:` down, de-indented
+#     by 4 spaces, without the `automation:` line and without the leading `- id:`.
+#     Pasting the whole file there fails with
+#     "Message malformed: not a valid option at 'automation'".
+#
+# Then:
+#   1. Set `notify_target` to your phone's notify action – find it in
 #      Developer tools → Actions as notify.mobile_app_<device_name>.
-#   3. Optionally adjust `dashboard_url` (tap target) and the room labels.
-#   4. Test the payload in Developer tools → Actions first; iOS has a limited
+#   2. Optionally adjust `dashboard_url` (tap target) and the room labels.
+#   3. Test the payload in Developer tools → Actions first; iOS has a limited
 #      "push-to-start" budget, so avoid start/stop loops while testing.
 #
 # Caveats (from the Companion docs):

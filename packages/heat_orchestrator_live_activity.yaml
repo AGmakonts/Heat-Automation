@@ -66,7 +66,7 @@ automation:
 
     variables:
       # ---- edit these --------------------------------------------------------
-      notify_target: notify.mobile_app_iphone          # your phone
+      notify_target: notify.mobile_app_iphone_adam     # your phone
       dashboard_url: /heat-orchestrator/control         # tap target (in-app path)
       # ------------------------------------------------------------------------
       tag: ho_pump_run

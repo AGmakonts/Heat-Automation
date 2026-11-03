@@ -135,7 +135,7 @@ INFO heat_orchestrator: === HeatOrchestrator ready ===
 - shows the rooms being heated (or DHW quota remaining), live power draw, a running timer since pump start and a progress bar of today's pump minutes against the allowed daily window (from the end to the start of the nightly off window)
 - colour-coded per state: amber = heating, blue = DHW quota, grey = stopping, red = `NO_FLOW`
 
-Copy it to `/config/packages/` and set `notify_target` to your phone's `notify.mobile_app_*` action. See the file header for details and caveats.
+Copy it to `/config/packages/` and list the phones' `notify.mobile_app_*` actions in `notify_targets`. See the file header for details and caveats.
 
 ## Default Parameters
 

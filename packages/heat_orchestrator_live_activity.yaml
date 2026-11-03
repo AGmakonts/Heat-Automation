@@ -47,8 +47,9 @@
 #     "Message malformed: not a valid option at 'automation'".
 #
 # Then:
-#   1. Set `notify_target` to your phone's notify action – find it in
-#      Developer tools → Actions as notify.mobile_app_<device_name>.
+#   1. List the phones in `notify_targets` – one notify.mobile_app_<device>
+#      action per iPhone, as shown in Developer tools → Actions (the slug of
+#      the device name: "iPhone (Anna) (2)" → notify.mobile_app_iphone_anna_2).
 #   2. Optionally adjust `dashboard_url` (tap target) and the room labels.
 #   3. Test the payload in Developer tools → Actions first; iOS has a limited
 #      "push-to-start" budget, so avoid start/stop loops while testing.
@@ -70,7 +71,9 @@ automation:
 
     variables:
       # ---- edit these --------------------------------------------------------
-      notify_target: notify.mobile_app_iphone_adam     # your phone
+      notify_targets:                                   # one per iPhone
+        - notify.mobile_app_iphone_adam
+        - notify.mobile_app_iphone_anna_2
       dashboard_url: /heat-orchestrator/control         # tap target (in-app path)
       # ------------------------------------------------------------------------
       tag: ho_pump_run
@@ -113,11 +116,14 @@ automation:
               - condition: trigger
                 id: pump_off
             sequence:
-              - action: "{{ notify_target }}"
-                data:
-                  message: clear_notification
-                  data:
-                    tag: "{{ tag }}"
+              - repeat:
+                  for_each: "{{ notify_targets }}"
+                  sequence:
+                    - action: "{{ repeat.item }}"
+                      data:
+                        message: clear_notification
+                        data:
+                          tag: "{{ tag }}"
 
         # ---- pump running → start / update the activity -----------------------
         default:
@@ -212,31 +218,34 @@ automation:
                       'critical': power_txt, 'relevance': 0.4} }}
                 {%- endif -%}
 
-          - action: "{{ notify_target }}"
-            data:
-              # header line – refreshed on every push (Companion ≥ 2026.9.2)
-              title: "{{ style.title }}"
-              # Lock Screen hides this while chronometer is on; expanded
-              # Dynamic Island shows it under the title
-              message: "{{ style.message }}"
-              data:
-                tag: "{{ tag }}"
-                live_update: true
-                # quiet in-place updates; iOS still alerts on the initial start
-                silent: true
-                critical_text: "{{ style.critical }}"
-                notification_icon: "{{ style.icon }}"
-                notification_icon_color: "{{ style.color }}"
-                background_color: "{{ style.bg }}"
-                text_color: "#FFFFFF"
-                # live "running for" timer
-                chronometer: true
-                when: "{{ started_ts }}"
-                # pump work today vs. the allowed daily window
-                progress: "{{ day_minutes }}"
-                progress_max: "{{ window_max }}"
-                progress_bar_color: "{{ style.color }}"
-                progress_bar_direction: increasing
-                # tap → dashboard (must be resent on every update)
-                url: "{{ dashboard_url }}"
-                relevance_score: "{{ style.relevance }}"
+          - repeat:
+              for_each: "{{ notify_targets }}"
+              sequence:
+                - action: "{{ repeat.item }}"
+                  data:
+                    # header line – refreshed on every push (Companion ≥ 2026.9.2)
+                    title: "{{ style.title }}"
+                    # Lock Screen hides this while chronometer is on; expanded
+                    # Dynamic Island shows it under the title
+                    message: "{{ style.message }}"
+                    data:
+                      tag: "{{ tag }}"
+                      live_update: true
+                      # quiet in-place updates; iOS still alerts on the initial start
+                      silent: true
+                      critical_text: "{{ style.critical }}"
+                      notification_icon: "{{ style.icon }}"
+                      notification_icon_color: "{{ style.color }}"
+                      background_color: "{{ style.bg }}"
+                      text_color: "#FFFFFF"
+                      # live "running for" timer
+                      chronometer: true
+                      when: "{{ started_ts }}"
+                      # pump work today vs. the allowed daily window
+                      progress: "{{ day_minutes }}"
+                      progress_max: "{{ window_max }}"
+                      progress_bar_color: "{{ style.color }}"
+                      progress_bar_direction: increasing
+                      # tap → dashboard (must be resent on every update)
+                      url: "{{ dashboard_url }}"
+                      relevance_score: "{{ style.relevance }}"

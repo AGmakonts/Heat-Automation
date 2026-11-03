@@ -1,0 +1,199 @@
+# =============================================================================
+# Heat Orchestrator – iPhone Live Activity (pump state)
+# =============================================================================
+# Shows the current pump run on the iPhone Lock Screen / Dynamic Island via the
+# Companion app's Live Activities. One activity per pump run:
+#
+#   start   relay switch turns on            → activity appears (alerts once)
+#   update  FSM state / rooms / health change → same tag, silent, in place
+#           + a 10-minute tick (refreshes power draw, re-creates the activity
+#             after an HA restart or after iOS expires it at the 8 h mark)
+#   end     relay switch off for 30 s        → clear_notification
+#
+# What the activity shows:
+#   title          "Pompa ciepła" (fixed for the whole run – iOS limitation)
+#   message        floor + rooms being heated, or DHW quota progress, or
+#                  "stopping" while the graceful shutdown runs
+#   critical_text  live power draw (top-right / compact Dynamic Island);
+#                  replaced by a NO_FLOW warning when pump_health flags it
+#   chronometer    live "running for" timer since the relay went on
+#   progress bar   pump minutes today vs. the daily DHW quota
+#   colors/icon    per state: amber = heating GF/FF, blue = DHW quota,
+#                  grey = stopping, red = NO_FLOW
+#
+# Requires: Home Assistant Core 2026.7+, Companion app with Live Activities,
+# iPhone on iOS 17.2+. Keys reference:
+# https://companion.home-assistant.io/docs/notifications/live-activities/
+#
+# Install:
+#   1. Copy to /config/packages/ (same as the other packages).
+#   2. Set `notify_target` below to your phone's notify action – find it in
+#      Developer tools → Actions as notify.mobile_app_<device_name>.
+#   3. Optionally adjust `dashboard_url` (tap target) and the room labels.
+#   4. Test the payload in Developer tools → Actions first; iOS has a limited
+#      "push-to-start" budget, so avoid start/stop loops while testing.
+#
+# Caveats (from the Companion docs):
+#   * iOS may throttle frequent updates – this automation coalesces bursts
+#     with mode: restart + a short delay and never pushes on raw power changes.
+#   * Activities need a working connection phone ↔ HA (remote access when
+#     away), otherwise they silently do not start/update.
+#   * If you swipe the activity away, the next 10-minute tick re-creates it.
+# =============================================================================
+automation:
+  - id: heat_orchestrator_pump_live_activity
+    alias: "HO – Pump Live Activity (iPhone)"
+    description: >-
+      Lock Screen / Dynamic Island Live Activity with the heat pump state:
+      floor and rooms being heated, power draw, run timer, DHW quota progress.
+    mode: restart
+
+    variables:
+      # ---- edit these --------------------------------------------------------
+      notify_target: notify.mobile_app_iphone          # your phone
+      dashboard_url: /heat-orchestrator/control         # tap target (in-app path)
+      title: "Pompa ciepła"
+      # ------------------------------------------------------------------------
+      tag: ho_pump_run
+      pump_switch: switch.zasilanie_pompy_sonoff_10017fadeb_1
+      pump_power: sensor.zasilanie_pompy_sonoff_10017fadeb_power
+      room_names:
+        gabinet_ani: "Gabinet Ani"
+        lazienka_parter: "Łazienka parter"
+        salon: "Salon"
+        garaz: "Garaż"
+        sypialnia: "Sypialnia"
+        lazienka_pietro: "Łazienka piętro"
+        pokoj_narozny: "Pokój narożny"
+        pokoj_z_garazem: "Pokój z garażem"
+
+    triggers:
+      - id: pump_on
+        trigger: state
+        entity_id: switch.zasilanie_pompy_sonoff_10017fadeb_1
+        to: "on"
+      - id: pump_off
+        trigger: state
+        entity_id: switch.zasilanie_pompy_sonoff_10017fadeb_1
+        to: "off"
+        for: "00:00:30"
+      - id: update
+        trigger: state
+        entity_id:
+          - input_text.heat_state
+          - input_text.active_rooms
+          - input_text.pump_health
+      - id: tick
+        trigger: time_pattern
+        minutes: "/10"
+
+    actions:
+      - choose:
+          # ---- pump stopped → end the activity --------------------------------
+          - conditions:
+              - condition: trigger
+                id: pump_off
+            sequence:
+              - action: "{{ notify_target }}"
+                data:
+                  message: clear_notification
+                  data:
+                    tag: "{{ tag }}"
+
+        # ---- pump running → start / update the activity -----------------------
+        default:
+          - condition: state
+            entity_id: switch.zasilanie_pompy_sonoff_10017fadeb_1
+            state: "on"
+
+          # The orchestrator writes heat_state, active_floor and active_rooms in
+          # the same tick; with mode: restart this collapses the burst into one
+          # push (iOS throttles rapid Live Activity updates).
+          - delay: "00:00:03"
+
+          - variables:
+              fsm: "{{ states('input_text.heat_state') }}"
+              health: "{{ states('input_text.pump_health') }}"
+              no_flow: "{{ health == 'NO_FLOW' }}"
+
+              power_w: "{{ states(pump_power) | float(none) }}"
+              power_txt: >-
+                {%- if power_w is none -%}
+                  —
+                {%- elif power_w >= 1000 -%}
+                  {{ (power_w / 1000) | round(1) }} kW
+                {%- else -%}
+                  {{ power_w | round(0) | int }} W
+                {%- endif -%}
+
+              rooms_txt: >-
+                {%- set ns = namespace(out=[]) -%}
+                {%- for r in states('input_text.active_rooms').split(',') -%}
+                  {%- set key = r | trim -%}
+                  {%- if key -%}
+                    {%- set ns.out = ns.out + [room_names.get(key, key)] -%}
+                  {%- endif -%}
+                {%- endfor -%}
+                {{ ns.out | join(', ') }}
+
+              # DHW quota: minutes the pump ran today vs. the daily minimum
+              quota_max: >-
+                {{ [(states('input_number.dhw_min_run_hours') | float(0) * 60) | round(0) | int, 1] | max }}
+              quota_done: >-
+                {{ [states('input_number.pump_on_minutes_today') | float(0) | round(0) | int, quota_max] | min }}
+              quota_left: "{{ quota_max - quota_done }}"
+
+              # Relay on-time drives the live "running for" chronometer.
+              started_ts: >-
+                {{ as_timestamp(states[pump_switch].last_changed, now().timestamp()) | int }}
+
+              # ---- per-state look ------------------------------------------
+              # Order matters: NO_FLOW overrides whatever the FSM says.
+              style: >-
+                {%- if no_flow -%}
+                  {{ {'icon': 'mdi:alert-circle', 'color': '#FF5252', 'bg': '#2A0F0F',
+                      'message': '⚠︎ Brak przepływu, pompa nie pracuje',
+                      'critical': '⚠︎ brak przepływu', 'relevance': 1.0} }}
+                {%- elif fsm == 'HEAT_GF' -%}
+                  {{ {'icon': 'mdi:home-floor-0', 'color': '#FFA726', 'bg': '#1C1208',
+                      'message': 'Parter · ' ~ (rooms_txt or 'wybieranie pokoi…'),
+                      'critical': power_txt, 'relevance': 0.7} }}
+                {%- elif fsm == 'HEAT_FF' -%}
+                  {{ {'icon': 'mdi:home-floor-1', 'color': '#FFA726', 'bg': '#1C1208',
+                      'message': 'Piętro · ' ~ (rooms_txt or 'wybieranie pokoi…'),
+                      'critical': power_txt, 'relevance': 0.7} }}
+                {%- elif fsm == 'DHW_QUOTA' -%}
+                  {{ {'icon': 'mdi:water-boiler', 'color': '#4FC3F7', 'bg': '#0B1620',
+                      'message': 'Ciepła woda · zostało ' ~ quota_left ~ ' min',
+                      'critical': power_txt, 'relevance': 0.6} }}
+                {%- else -%}
+                  {{ {'icon': 'mdi:pump-off', 'color': '#B0BEC5', 'bg': '#141414',
+                      'message': 'Zatrzymywanie pompy…',
+                      'critical': power_txt, 'relevance': 0.4} }}
+                {%- endif -%}
+
+          - action: "{{ notify_target }}"
+            data:
+              title: "{{ title }}"
+              message: "{{ style.message }}"
+              data:
+                tag: "{{ tag }}"
+                live_update: true
+                # quiet in-place updates; iOS still alerts on the initial start
+                silent: true
+                critical_text: "{{ style.critical }}"
+                notification_icon: "{{ style.icon }}"
+                notification_icon_color: "{{ style.color }}"
+                background_color: "{{ style.bg }}"
+                text_color: "#FFFFFF"
+                # live "running for" timer
+                chronometer: true
+                when: "{{ started_ts }}"
+                # DHW quota progress for today
+                progress: "{{ quota_done }}"
+                progress_max: "{{ quota_max }}"
+                progress_bar_color: "{{ style.color }}"
+                progress_bar_direction: increasing
+                # tap → dashboard (must be resent on every update)
+                url: "{{ dashboard_url }}"
+                relevance_score: "{{ style.relevance }}"

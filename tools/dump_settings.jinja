@@ -1,0 +1,74 @@
+{#- Heat Orchestrator settings dump.
+    Paste into Home Assistant: Developer Tools → Template, copy the rendered output.
+    Read-only: it renders state, it changes nothing. -#}
+{%- set rooms = [
+  ('gabinet_ani',     'GF', 'climate.gabinet_ani'),
+  ('lazienka_parter', 'GF', 'climate.lazienka_parter'),
+  ('salon',           'GF', 'climate.salon'),
+  ('garaz',           'GF', 'climate.garaz'),
+  ('sypialnia',       'FF', 'climate.sypialnia'),
+  ('lazienka_pietro', 'FF', 'climate.lazienka_pietro'),
+  ('pokoj_narozny',   'FF', 'climate.pokoj_narozny'),
+  ('pokoj_z_garazem', 'FF', 'climate.pokoj_z_garazem'),
+] -%}
+{%- set globals = [
+  'room_off_setpoint', 'heating_hyst_on', 'heating_hyst_off',
+  'min_state_duration_min', 'min_pump_on_min', 'min_pump_off_min',
+  'dhw_min_run_hours', 'dhw_exclusive_max_run_min', 'dhw_exclusive_pause_min',
+  'max_continuous_heating_min', 'max_continuous_heating_solo_min',
+  'lerp_temp_min', 'lerp_temp_max', 'lerp_rooms_min', 'lerp_rooms_max',
+  'bulk_mode_temp', 'sequential_mode_temp', 'max_rooms_limited',
+] -%}
+{%- set dts = ['off_window_start', 'off_window_end', 'day_reset_time',
+               'state_since', 'last_pump_on', 'last_pump_off'] -%}
+{%- set texts = ['heat_state', 'active_floor', 'active_rooms', 'pump_health'] -%}
+{%- set counters = ['pump_on_minutes_today', 'pump_starts_today'] -%}
+{%- set pump_switch = 'switch.zasilanie_pompy_sonoff_10017fadeb_1' -%}
+{%- set pump_power = 'sensor.zasilanie_pompy_sonoff_10017fadeb_power' -%}
+{%- set outdoor = 'sensor.komfovent_outdoor_temperature' -%}
+{%- set weather = 'weather.forecast_home' -%}
+=== HEAT ORCHESTRATOR DUMP ===
+now: {{ now().isoformat(timespec='seconds') }}
+
+[global params]  value (helper min / max / step)
+{% for k in globals -%}
+{%- set e = 'input_number.' ~ k -%}
+{{ '%-32s' | format(k) }} {{ states(e) }}  ({{ state_attr(e, 'min') }} / {{ state_attr(e, 'max') }} / {{ state_attr(e, 'step') }})
+{% endfor %}
+[datetimes]
+{% for k in dts -%}
+{{ '%-32s' | format(k) }} {{ states('input_datetime.' ~ k) }}
+{% endfor %}
+[fsm / diagnostics]
+{% for k in texts -%}
+{{ '%-32s' | format(k) }} {{ states('input_text.' ~ k) }}
+{% endfor -%}
+{% for k in counters -%}
+{{ '%-32s' | format(k) }} {{ states('input_number.' ~ k) }}
+{% endfor %}
+[pump]
+{{ '%-32s' | format('relay') }} {{ states(pump_switch) }}  (last_changed {{ states[pump_switch].last_changed.isoformat(timespec='seconds') if states[pump_switch] is not none else 'n/a' }})
+{{ '%-32s' | format('power_W') }} {{ states(pump_power) }}
+
+[outdoor]
+{{ '%-32s' | format('komfovent_outdoor') }} {{ states(outdoor) }}
+{{ '%-32s' | format('met.no_temperature') }} {{ state_attr(weather, 'temperature') }}
+
+[rooms]  key | floor | user_sp | prio | heating | heat_min | TRV: current / target / hvac_action / mode / step / min-max
+{% for key, floor, climate in rooms -%}
+{{ '%-16s' | format(key) }} {{ floor }}  sp={{ states('input_number.user_sp_' ~ key) }}  prio={{ states('input_number.priority_' ~ key) }}  heating={{ states('input_boolean.heating_' ~ key) }}  min={{ states('input_number.heating_minutes_' ~ key) }}  | TRV cur={{ state_attr(climate, 'current_temperature') }} tgt={{ state_attr(climate, 'temperature') }} act={{ state_attr(climate, 'hvac_action') }} mode={{ states(climate) }} step={{ state_attr(climate, 'target_temp_step') }} range={{ state_attr(climate, 'min_temp') }}-{{ state_attr(climate, 'max_temp') }}
+{% endfor %}
+[TRV current_temperature resolution check]  distinct fractional parts seen right now
+{% set ns = namespace(fracs=[]) -%}
+{% for key, floor, climate in rooms -%}
+{%- set t = state_attr(climate, 'current_temperature') -%}
+{%- if t is number -%}
+{%- set f = ((t * 10) | round(0) | int) % 10 -%}
+{%- if f not in ns.fracs %}{% set ns.fracs = ns.fracs + [f] %}{% endif -%}
+{%- endif -%}
+{% endfor -%}
+tenths seen: {{ ns.fracs | sort }}   (only 0 and 5 → likely 0.5°C resolution; other digits → 0.1°C)
+
+[climate attributes, first room, for reference]
+{{ states[rooms[0][2]].attributes if states[rooms[0][2]] is not none else 'n/a' }}
+=== END ===

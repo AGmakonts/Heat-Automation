@@ -80,7 +80,42 @@ i sypialnia na 23,5°C to największa dźwignia kWh w instalacji (ok. 6% na stop
 - Powierzchnia dębu po 4–6 h ciągłego biegu jednej pętli (pirometr): jeśli > 27°C, obniżyć
   `max_continuous_heating_solo_min` lub przestawić mieszacz.
 
-## 5. Pytania otwarte
+## 5. Wyniki z historii HA 25.10–04.11.2026 (`tools/analyze_history_energy.py`)
+
+| Metryka | Wartość |
+|---|---|
+| Czas pracy przekaźnika | 163 h / 11 dni (~16 h/dobę w dni z pełną pracą) |
+| Starty sprężarki (próg 600 W) | 52, czyli 0,32/h; 99% próbek w HEAT_* > 600 W; biegi sprężarki liczone w godzinach |
+| Pobór przy pracy | mediana 1,6–1,8 kW przy +8…10°C, 2,6–2,9 kW przy 0°C, sufit ~3,2–3,4 kW |
+| Różnica poboru 1 vs 2 pokoje | 200–300 W przy tej samej T_zew |
+| Energia | 30–36 kWh/dobę przy średniej T_zew 5–7°C; ≈ 2 kWh na godzinę pracy przekaźnika |
+| Średnia temp. 8 pokoi | 21,0–21,4°C; profil dobowy płaski, okno nocne obniża o ~0,15 K |
+| Aktywne pokoje w czasie pracy | 1 pokój 70%, 2 pokoje 29%, 3 pokoje 1% (limit z demand, nie z LERP) |
+| Opóźnienie reakcji pokoju | mediana 44–112 min do pierwszego wzrostu odczytu o 0,5°C |
+| Sesje grzania pokoju | mediana 87–120 min; 30–50% sesji ucięte capem 120 min; 83 przełączenia pięter w 160 h |
+| Przestrzelenie po stopie | max(T) − sp w 3 h: +0,5 (salon, sypialnia), +0,25 (łazienka piętro), 0 (reszta) |
+| `DHW_QUOTA` | 1,5 h łącznie; bez znaczenia w sezonie |
+
+Wnioski, które korygują wcześniejsze sekcje:
+
+- **Brak taktowania.** Inwerter moduluje, biegi sprężarki trwają godziny. Argument "mało pętli =
+  cyklowanie" nie dotyczy tej jednostki; `lerp_rooms_min` jest wyłącznie mechanizmem triage.
+- **Pobór rośnie z mrozem, nie z liczbą pętli.** Przy 0°C jednostka jest blisko sufitu 3,3 kW.
+  Poniżej ok. -3°C pracuje na maksimum przy malejącej wydajności cieplnej: pompa będzie chodzić
+  24 h, setpointy 23,5°C nie będą trzymane, a LERP (triage) zdecyduje, które pokoje są ciepłe.
+  Ekstrapolacja zapotrzebowania (~3,5 kWh/dobę na każdy K poniżej ~15°C) daje ~90 kWh/dobę
+  przy -10°C; sufit jednostki to ~80 kWh/dobę elektrycznych przy spadającym COP.
+- **Energia ≈ godziny pracy × ~2 kW.** Jednostka oddaje wszystko, co wyprodukuje (bufor + podłoga
+  odbierają), więc kWh zależą od strat domu i COP, nie od sposobu rotacji pokoi. Nastawy
+  orchestratora dają łącznie rząd 3–5% (przestrzelenie + churn), nie więcej.
+- **Okno nocne** jest energetycznie neutralne (0,15 K na średniej). Decyzja komfortowa.
+- **Cap 120 min i 25 min na piętro** ucinały pokoje dokładnie wtedy, gdy zaczynały reagować
+  (opóźnienie 1–2 h). Nowe 240/60 adresuje to; w danych jeszcze niewidoczne (zmiana 04.11).
+
+Dźwignie wg wielkości: temperatura wymiennika/bojlera (COP), setpointy, wydajność jednostki
+w mrozie; dopiero potem `hyst_off ≤ 0` i reszta sekcji 3.
+
+## 6. Pytania otwarte
 
 - Histereza termostatu wymiennika / bojlera (częstość cykli sprężarki przy jednej pętli).
 - Historia mocy Sonoffa w mroźny dzień przy pełnym bojlerze (czy cykluje przy 1–2 pętlach).

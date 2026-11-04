@@ -9,8 +9,7 @@ Stan na 2026-11-04. Dotyczy instalacji:
 - podłoga: sklejka brzozowa + dąb na wylewce (limit powierzchni 27°C, duża bezwładność)
 - dwa rozdzielacze (GF/FF) z wyłącznością pięter
 
-Zweryfikowane (dump z 2026-11-04 21:31): taryfa **G12** (założone strefy tanie 22:00–06:00
-i 13:00–15:00, do potwierdzenia u OSD), dwie pompy obiegowe (po jednej na piętro) na tym samym
+Zweryfikowane (dump z 2026-11-04 21:31): taryfa **płaska** (jedna cena całą dobę), dwie pompy obiegowe (po jednej na piętro) na tym samym
 przekaźniku co klimatyzator, załączane gdy ≥1 zawór piętra otwarty; bojler 200 l; termostaty
 raportują `current_temperature` z krokiem **0,5°C**; w sezonie pompa chodzi ~16 h/dobę (961 min
 do 21:31 przy +2°C, 2 starty).
@@ -31,9 +30,9 @@ do 21:31 przy +2°C, 2 starty).
 | `input_number.lerp_temp_min` | -16 | **-16** | ok |
 | `input_number.lerp_temp_max` | 10 | **10** | ok |
 | `input_number.dhw_min_run_hours` | 2.5 | **2.5** | Bez zmian do czasu czujnika w bojlerze (sekcja 3). |
-| `input_number.dhw_exclusive_max_run_min` | 45 | **60** | Z oknem OFF poza nocą kwota wypełnia się od resetu o 00:00: bloki 00:00–01:00, 02:00–03:00, 04:00–04:30, wszystkie w taniej strefie. |
-| `input_number.dhw_exclusive_pause_min` | 40 | **60** | 40 < `min_pump_off` 45, więc i tak działało 45. 60 daje 3 starty. Alternatywa: 0/0 (jeden blok 00:00–02:30, 1 start). |
-| `input_datetime.off_window_start/end` | 00:00–04:00 | **06:00–13:00** | Obecne okno leży w taniej strefie G12, czyli blokuje grzanie wtedy, gdy jest najtańsze. 06:00–13:00 to drogie godziny; wylewka naładowana nocą niesie dom do 13:00 (spadek ~0,5–1°C przy +2°C, ~1,5°C przy -10°C). Za duży spadek: 06:00–11:00. Druga strefa droga 15:00–22:00 wymaga drugiego okna (sekcja 3). |
+| `input_number.dhw_exclusive_max_run_min` | 45 | **60** | Poza sezonem liczą się tylko starty: 3 bloki (04:00, ~07:30, ~11:00) zamiast 4–5. Alternatywa 0/0: jeden blok, 1 start. |
+| `input_number.dhw_exclusive_pause_min` | 40 | **150** | 40 < `min_pump_off` 45, więc i tak działało 45. |
+| `input_datetime.off_window_start/end` | 00:00–04:00 | **00:00–04:00** | Przy taryfie płaskiej energetycznie ~neutralne: 4 h przerwy obniża średnią temperaturę domu o ~0,5°C przez 1/6 doby (ułamek procenta), a odzysk o 04:00 idzie przy prawie tej samej temperaturze zewnętrznej. Zostaw ze względu na komfort snu albo skasuj, bez straty. |
 | `input_number.room_off_setpoint` | 7 | 7 | bez zmian |
 | `bulk_mode_temp`, `sequential_mode_temp`, `max_rooms_limited` | — | — | nieużywane przez kod |
 
@@ -58,17 +57,15 @@ i sypialnia na 23,5°C to największa dźwignia kWh w instalacji (ok. 6% na stop
    `sp-0,5 … sp` zamiast `sp-0,5 … sp+0,5`. Średnia temperatura wszystkich pokoi niżej o 0,5°C
    bez zmiany nastaw. Obejście bez kodu: `user_sp` o 0,5 niżej (nastawy przestają znaczyć to,
    co pokazują termostaty).
-2. **Drugie okno OFF** (15:00–22:00) lub lista okien w `_in_off_window`. Z jednym oknem druga
-   droga strefa G12 jest grzana na żądanie.
-3. **Boost taryfowy**: `input_number.tariff_boost` (0,5–1,0°C) dodawany do `user_sp`
-   w `_need_heat`/`_satisfied` w taniej strefie (okna z helperów). Bez boostu noc tylko utrzymuje
-   setpoint; z boostem wylewka jest ładowana ponad niego i realne kWh przesuwają się do taniej
-   strefy. Przy 33°C na rozdzielaczu i limicie 27°C na dębie 1°C jest osiągalny, 2°C nie.
-4. Kwota CWU po temperaturze zamiast po czasie (`DHW_QUOTA` gdy bojler < X°C, koniec ≥ Y°C).
+2. Kwota CWU po temperaturze zamiast po czasie (`DHW_QUOTA` gdy bojler < X°C, koniec ≥ Y°C).
    Wymaga czujnika z sekcji 2. Poza sezonem usuwa biegi bez odbioru przy pełnym bojlerze.
-5. `_tick`, gałąź "brak demand, brak quota" (ok. l. 1291): podczas czekania na `min_pump_on`
+3. `_tick`, gałąź "brak demand, brak quota" (ok. l. 1291): podczas czekania na `min_pump_on`
    zawory zostają otwarte na `sp + 2`, pompy obiegowe tłoczą 33°C do dogrzanych pokoi. Dodać
    `_disable_all_rooms()`. W sezonie (pompa ~16 h/dobę) praktycznie nie występuje.
+4. Eksperymentalnie: boost `+0,5°C` do `user_sp` w najcieplejszych godzinach doby
+   (ok. 10:00–16:00, COP klimatyzatora o 15–20% lepszy niż nocą, bez odszraniania) plus dłuższe
+   okno OFF nocą (00:00–06:00). Zysk rzędu kilku procent, niepewny, bo cieplejszy dom w południe
+   to większe straty. Dopiero po punkcie 1 i po pomiarze.
 
 ## 4. Jak zweryfikować po zmianie
 
@@ -85,6 +82,5 @@ i sypialnia na 23,5°C to największa dźwignia kWh w instalacji (ok. 6% na stop
 
 ## 5. Pytania otwarte
 
-- Dokładne godziny stref G12 u Twojego OSD (założono 22–06 i 13–15).
 - Histereza termostatu wymiennika / bojlera (częstość cykli sprężarki przy jednej pętli).
 - Historia mocy Sonoffa w mroźny dzień przy pełnym bojlerze (czy cykluje przy 1–2 pętlach).
